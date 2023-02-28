@@ -40,9 +40,14 @@ parser.add_argument('--save_interval', default=10000, type=int)
 parser.add_argument('--alias', default="", type=str, help="alias of the experiment")
 parser.add_argument('--sub_data', default="mix", type=str, help="data for training")
 parser.add_argument('--max_save_num', default=5, type=int)
-parser.add_argument('--depth', default=8, type=int)
+parser.add_argument('--depth', default=2, type=int)
 parser.add_argument('--heads', default=8, type=int)
-parser.add_argument('--layersize', default=512, type=int)
+parser.add_argument('--key_dim', default=512, type=int)
+parser.add_argument('--model_dim', default=512, type=int)
+parser.add_argument('--vocab_size', default=256, type=int)
+parser.add_argument('--num_actions', default=2, type=int)
+parser.add_argument('--token_learner_num', default=8, type=int)
+parser.add_argument('--seq_len', default=6, type=int)
 parser.add_argument('--scheduler_t', default=5, type=int)
 parser.add_argument('--lr', default=1e-5, type=float)
 parser.add_argument('--lr_min', default=1e-5, type=float)
@@ -75,8 +80,8 @@ def setup_seed(seed):
 
 
 def log_init(args=None):
-    history = os.path.expanduser('~/history')
-    # history = "/raid/history"
+    # history = os.path.expanduser('~/history')
+    history = "/home/cz/bs/rt_torch/history"
     # log_name = time.strftime("%Y%m%d-%H%M%S", time.localtime()) + '/'
     if args.load_path is not None:
         log_name = os.path.basename(args.load_path) + "_" + time.strftime("%m%d-%H%M",time.localtime())
@@ -160,7 +165,12 @@ def main(args):
     scheduler = args.scheduler
     depth = args.depth
     heads = args.heads
-    layersize = args.layersize
+    key_dim = args.key_dim
+    vocab_size = args.vocab_size
+    num_actions = args.num_actions
+    model_dim = args.model_dim
+    seq_len = args.seq_len
+    token_learner_num = args.token_learner_num
     print('device: ', device)
     
     # train_loader = language_table_dataset(dataset_type="train", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
@@ -186,17 +196,17 @@ def main(args):
     # train_loader._create_process()
     # test_loader._create_process()
     model = RT1_transformer(
-            num_actions=2,
-            vocab_size=256,
-            num_layers=1,
-            heads=8,
-            key_dim=4096,
-            feed_forward_size=512,
-            text_encoder='t5',
-            seq_len=6,
+            num_actions=num_actions,
+            vocab_size=vocab_size,
+            num_layers=depth,
+            heads=heads,
+            key_dim=key_dim,
+            feed_forward_size=model_dim,
+            text_encoder=text_encoder,
+            seq_len=seq_len,
             text_model_device='cpu',
             token_learner=True,
-            learned_token_num=8,
+            learned_token_num=token_learner_num,
             token_learner_dropout=0.1,
             transformer_dropout=0.1,
             return_last=False,
