@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import torch.nn.functional as F
 
 
 
@@ -25,11 +26,11 @@ class ActionTokenizer:
         # import pdb
         # pdb.set_trace()
         x = ((x - self.min) / self.max / 2 * (self.num_action_bin - 1)).int().type(torch.int64) # x < num_action_bin
-        # try:
-        #     x = F.one_hot(x, num_classes=self.num_action_bin)
-        # except Exception as e:
-        #     import pdb
-        #     pdb.set_trace()
+        try:
+            x = F.one_hot(x, num_classes=self.num_action_bin)
+        except Exception as e:
+            import pdb
+            pdb.set_trace()
         return x
 
     def discrete2Scalar(self, x):

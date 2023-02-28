@@ -45,7 +45,7 @@ class RT1_transformer(nn.Module):
                                              drop_out_rate=transformer_dropout,
                                              return_last=return_last,
                                              )
-
+        self.return_last = return_last
         self.seq_len = seq_len
         self.memory_buffer = None
 
@@ -94,15 +94,16 @@ class RT1_transformer(nn.Module):
         if texts_embeddings is None:
             texts_embeddings = self.text_tokenizer(texts)
         image_tokens = self.image_tokenizer(video, texts_embeddings)
+        # import pdb; pdb.set_trace()
         if split_idx is not None:
             image_tokens = self.token_stack(image_tokens, split_idx, new_ep)
-            # import pdb; pdb.set_trace()
             image_tokens = rearrange(image_tokens, 'b f n c -> b (f n) c')
         attn_mask = torch.ones((frames * self.num_learned_tokens, frames * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
         
         # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
         # import pdb; pdb.set_trace()
-        last_logits = logits[:, -self.num_learned_tokens:, :]
-        last_pooled = reduce(last_logits, 'b n d -> b d', 'mean')
-        return last_pooled
+        if self.return_last:
+            return logits
+        else:
+            return logits[:, -1]

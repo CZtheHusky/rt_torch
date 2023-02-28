@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from rt_torch.utilizes.utilize import *
 from einops import rearrange, einsum
+from einops.layers.torch import Rearrange, Reduce
 from rt_torch.film_efficient.film_conditioning import FiLM
 from rt_torch.utilizes.utilize import *
 
@@ -129,7 +130,10 @@ class TransformerBlocks(nn.Module):
         ])
         self.token_embedding = nn.Linear(input_embedding_size, feed_forward_size)
         self.position_embedding = nn.Embedding(max_sequence_len, feed_forward_size)
-        self.output_tokens = nn.Linear(feed_forward_size, num_actions * vocab_size)
+        self.output_tokens = nn.Sequential(
+            nn.Linear(feed_forward_size, num_actions * vocab_size),
+            Rearrange('... (a b) -> ... a b', b=vocab_size),
+            )
         self.return_last = return_last
 
     def forward(self,
@@ -148,6 +152,8 @@ class TransformerBlocks(nn.Module):
 
         for layer in self.layers:
             x = layer(x, attention_mask)
-        last_x = x[]    # b (t n) d
+        if self.return_last:
+            import pdb; pdb.set_trace()
+            x = x[:, -1]    # b (t n) d
         return self.output_tokens(x)
 
