@@ -6,4 +6,4 @@
 # python /home/cz/bs/robotic-transformer-pytorch/robotic_transformer/train.py --device_idx 7 --lr 5e-5 --alias MHSA_LM_test
 # python /home/cz/bs/robotic-transformer-pytorch/robotic_transformer/train.py --alias MHSA_LAYER_infer_rep  --device_idx 7 --lr 1e-4 --optimizer adam --batch_size 64
 # python /home/cz/bs/robotic-transformer-pytorch/robotic_transformer/train.py --alias MHSA_LAYER_infer_rep  --device_idx 6 --lr 1e-6 --optimizer adam --batch_size 64
-# python /home/cz/bs/robotic-transformer-pytorch/robotic_transformer/train.py --alias MHSA_LAYER_infer_rep  --device_idx 4 --lr 1e-5 --optimizer adam --batch_size 64
+# python /home/cz/bs/rt_torch/train.py --alias MHSA_LAYER_infer_rep  --device_idx 7 --lr 1e-5 --optimizer adam --batch_size 64
