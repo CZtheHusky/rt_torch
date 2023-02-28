@@ -153,7 +153,7 @@ class TransformerBlocks(nn.Module):
         for layer in self.layers:
             x = layer(x, attention_mask)
         if self.return_last:
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             x = x[:, -1]    # b (t n) d
         return self.output_tokens(x)
 

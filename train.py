@@ -209,7 +209,7 @@ def main(args):
             learned_token_num=token_learner_num,
             token_learner_dropout=0.1,
             transformer_dropout=0.1,
-            return_last=False,
+            return_last=True,
     )
     model.to(device)
     optimizer = get_optimizer(args, model)
