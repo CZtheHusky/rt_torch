@@ -87,7 +87,7 @@ class language_table_dataset_npz(Dataset):
         self.ds_list = []
         self.weight = []
         self.sub_size = {}
-        # self.sub_len = {}
+        self.sub_len = {}
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.stack = stack
@@ -143,17 +143,17 @@ class language_table_dataset_npz(Dataset):
                     ds_chunk_len = chunk_len[:train_size].sum()
                     self.index_range[k] = [0, train_size]
                     self.chunk_size += ds_chunk_len
-                    # self.sub_len[k] = ds_chunk_len
+                    self.sub_len[k] = ds_chunk_len
                     self.sub_size[k] = train_size
                 else:
                     ds_chunk_len = chunk_len[train_size:].sum()
                     self.index_range[k] = [train_size, size]
                     self.chunk_size += ds_chunk_len
-                    # self.sub_len[k] = ds_chunk_len
+                    self.sub_len[k] = ds_chunk_len
                     self.sub_size[k] = test_size
 
                 if weight is None:
-                    self.weight.append(size)
+                    self.weight.append(self.sub_len[k])
                     self.ds_list.append(k)
                 elif weight[idx] != 0:
                     self.ds_list.append(k)
