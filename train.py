@@ -258,20 +258,21 @@ def main(args):
     print(f"split: train-{len(train_loader)}, test-{len(test_loader)}")
     train_loss = deque(maxlen=100)
 
-    avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
+    # avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
 
     for epoch in range(epoch_s, num_epoch):
         model.train()
 
-        time0 = time.time()
+        # time0 = time.time()
 
         for data in tqdm(train_loader):
-            time1 = time.time()
-            avg_time["data_prep"] += (time1 - time0)
+            
+            # time1 = time.time()
+            # avg_time["data_prep"] += (time1 - time0)
 
             loss = model.cal_loss(data, device)
 
-            time2 = time.time()
+            # time2 = time.time()
 
             optimizer.zero_grad()
             loss.backward()
@@ -282,9 +283,9 @@ def main(args):
             elif scheduler is not None:
                 lr_scheduler.step()
 
-            time0 = time.time()
-            avg_time["inference"] += (time2 - time1)
-            avg_time["gradient_step"] += (time0 - time2)
+            # time0 = time.time()
+            # avg_time["inference"] += (time2 - time1)
+            # avg_time["gradient_step"] += (time0 - time2)
             
             loss_step += 1
             train_loss.append(loss.detach().cpu().numpy())
