@@ -69,7 +69,7 @@ sub_datas = ["mix"] + list(dataset_paths.keys())
 
 
 class language_table_dataset_npz(Dataset):
-    def __init__(self, mode: str, ds_type: str, split=0.9, weight=None, batch_size=16, stack=True, rgb_list=False, stack_num=6) -> None:
+    def __init__(self, mode: str, ds_type: str, split=0.9, weight=None, batch_size=16, stack=True, rgb_list=False, stack_num=6, shuffle=True, seed=100) -> None:
         super().__init__()
         assert ds_type in sub_datas
         assert weight is None or len(weight) == 9
@@ -91,6 +91,9 @@ class language_table_dataset_npz(Dataset):
         self.stack = stack
         self.rgb_list = rgb_list
         self.stack_num = stack_num
+        self.seed = seed
+        if shuffle:
+            np.random.seed(self.seed)
         for idx, (k, v) in enumerate(dataset_paths.items()):
             obs_path = v + "/observations"
             act_path = v + "/actions"
@@ -110,6 +113,9 @@ class language_table_dataset_npz(Dataset):
                 size = len(traj_len)
                 train_size = int(size * self.split)
                 test_size = size - int(size * self.split)
+                file_idx = np.arange(size)
+                if shuffle:
+                    np.random.shuffle(file_idx)
                 self.ds_stats[k] = {
                     "path": {    
                         "action": act_path,
@@ -123,6 +129,7 @@ class language_table_dataset_npz(Dataset):
                     "train_size": train_size,
                     "test_size": test_size,
                     "current_idx": 0,
+                    "file_idx": file_idx,
                 }
                 if self.mode == 0:
                     ds_traj_len = traj_len[:train_size].sum()
@@ -138,7 +145,7 @@ class language_table_dataset_npz(Dataset):
                     self.sub_size[k] = test_size
 
                 if weight is None:
-                    self.weight.append(size)
+                    self.weight.append(self.sub_len[k])
                     self.ds_list.append(k)
                 elif weight[idx] != 0:
                     self.ds_list.append(k)
@@ -160,9 +167,9 @@ class language_table_dataset_npz(Dataset):
         self.new_ep = False
         self.next_new_ep = True
         assert len(self.weight) > 0
-        print(self.weight)
         print(self.ds_list)
-                
+
+
     def __loaditem__(self, ds=None):
         while self.buffer_len < self.batch_size:
             if ds is None:
@@ -170,7 +177,7 @@ class language_table_dataset_npz(Dataset):
                 ds_name = self.ds_list[choice]
             else:
                 ds_name = ds
-            npz_name = str(self.ds_stats[ds_name]["current_idx"] % self.sub_size[ds_name] + self.index_range[ds_name][0]) + ".npz"
+            npz_name = str(self.ds_stats[ds_name]["file_idx"][self.ds_stats[ds_name]["current_idx"] % self.sub_size[ds_name]] + self.index_range[ds_name][0]) + ".npz"
             if self.embed_ready:
                 inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
             else:
