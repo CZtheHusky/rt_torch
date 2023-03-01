@@ -47,6 +47,8 @@ class RT1_transformer(nn.Module):
         self.act_idx = torch.arange(self.num_learned_tokens - 1, seq_len * self.num_learned_tokens, self.num_learned_tokens)
         self.seq_len = seq_len
         self.memory_buffer = None
+        self.action_tokenizer = ActionTokenizer(num_action_bin=256, action_max=0.1, action_min=-0.1)
+        self.criterion = nn.CrossEntropyLoss()
 
     def forward(
             self,
@@ -54,8 +56,6 @@ class RT1_transformer(nn.Module):
             texts: Optional[List[str]] = None,
             texts_embeddings=None,
     ):
-        # depth = self.transformer_depth
-        bs = video.shape[0]
         video = rearrange(video, 'b t c h w -> (b t) c h w')
         device = video.device
         if texts_embeddings is None:
@@ -64,8 +64,25 @@ class RT1_transformer(nn.Module):
             texts_embeddings = rearrange(texts_embeddings, 'b t d -> (b t) d')
         image_tokens = self.image_tokenizer(video, texts_embeddings)
         # import pdb; pdb.set_trace()
-        image_tokens = rearrange(image_tokens, '(b t) n c -> b (t n) c', b=bs)
-        # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
+        image_tokens = rearrange(image_tokens, '(b t) n c -> b (t n) c', t=self.seq_len)
         logits = self.transformer(image_tokens, attention_mask=self.attn_mask.to(device), gather_idx=self.act_idx)
         # import pdb; pdb.set_trace()
         return logits
+    
+    def cal_loss(self,
+              data,
+              device,
+              ):
+        rgbs, instructions, actions, inst_embeddings, act_mask = data
+        rgbs = rgbs.to(device)
+        actions = actions.to(device)
+        actions_discretes = self.action_tokenizer.discretize(actions)
+        if inst_embeddings is not None:
+            inst_embeddings = inst_embeddings.to(device)
+        predicts = self.forward(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings)
+        valid_idx = torch.where(act_mask == 0)
+        actions_discretes = actions_discretes.view(-1, self.seq_len, 2)
+        predicts = predicts[valid_idx].permute(0, 2, 1)
+        actions_discretes = actions_discretes[valid_idx]
+        loss = self.criterion(predicts, actions_discretes)
+        return loss

@@ -94,7 +94,7 @@ class language_table_dataset_npz(Dataset):
         self.rgb_list = rgb_list
         self.action_idx = np.arange(token_num - 1, seq_len * token_num, token_num)
         self.rgb_padding = torch.zeros(seq_len - 1, 3, 300, 300)
-        self.act_padding = torch.zeros(seq_len - 1, 2)
+        self.act_padding = torch.ones(seq_len - 1, 2)
         self.inst_embed_padding = torch.zeros(seq_len - 1, 768)
         self.inst_padding = [""] * (seq_len - 1)
         self.seed = seed
@@ -172,6 +172,7 @@ class language_table_dataset_npz(Dataset):
         self.weight = np.array(self.weight) / np.sum(self.weight)
         self.buffer = {"rgb": [], "inst": [], "act": [], "act_mask": []}
         self.buffer_len = 0
+        self.steps_per_batch = seq_len * batch_size
         assert len(self.weight) > 0
         print(self.ds_list)
                 
@@ -218,13 +219,99 @@ class language_table_dataset_npz(Dataset):
             self.buffer["act_mask"].extend(act_mask)
             self.ds_stats[ds_name]["current_idx"] += 1
             self.ds_stats[ds_name]["current_idx"] %= self.sub_size[ds_name]
-            
+
+    # def __loaditem__(self, ds=None):
+    #     while self.buffer_len < self.batch_size:
+    #         if ds is None:
+    #             choice = np.random.choice(len(self.weight), p=self.weight)
+    #             ds_name = self.ds_list[choice]
+    #         else:
+    #             ds_name = ds
+    #         npz_name = str(self.ds_stats[ds_name]["file_idx"][self.ds_stats[ds_name]["current_idx"] % self.sub_size[ds_name]] + self.index_range[ds_name][0]) + ".npz"
+    #         # print(f"accessing {ds_name}, idx: {npz_name}")
+    #         if self.embed_ready:
+    #             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
+    #         else:
+    #             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["instruction"], npz_name))['arr_0']
+    #         rgb = np.load(os.path.join(self.ds_stats[ds_name]["path"]["rgb"], npz_name))['arr_0']
+    #         act = np.load(os.path.join(self.ds_stats[ds_name]["path"]["action"], npz_name))['arr_0']
+    #         split_num = int(ceil(len(rgb) / self.seq_len))
+    #         self.buffer_len += split_num
+    #         # print(f"add {len(rgb)} into buffer: {self.buffer_len}")
+    #         rgb, inst, act = self.return_preprocess(rgb, inst, act)
+    #         n = len(rgb) % self.seq_len
+    #         action_mask = torch.zeros(split_num, self.seq_len)
+    #         if n:
+    #             padding_num = self.seq_len - n
+    #             # import pdb; pdb.set_trace()
+    #             rgb = torch.cat([rgb, self.rgb_padding[:padding_num]])
+    #             action_mask[-1, -padding_num:] = 1
+    #             if self.embed_ready:
+    #                 inst = torch.cat([inst, self.inst_embed_padding[:padding_num]])
+    #             else:
+    #                 inst = inst.extend(self.inst_padding[:padding_num])
+    #             act = torch.cat([act, self.act_padding[:padding_num]])
+    #         # if len(rgb) % self.seq_len != 0 or len(inst) % self.seq_len != 0 or len(act) % self.seq_len != 0:
+    #         #     import pdb; pdb.set_trace()
+    #         self.buffer["rgb"].append(rgb)
+    #         self.buffer["inst"].append(inst)
+    #         self.buffer['act'].append(act)
+    #         self.buffer["act_mask"].append(action_mask)
+    #         self.ds_stats[ds_name]["current_idx"] += 1
+    #         self.ds_stats[ds_name]["current_idx"] %= self.sub_size[ds_name]
+        
 
     def return_preprocess(self, rgb, inst, act):
         if self.stack:
             return frame_stack(torch.tensor(rgb).float() / 255), torch.tensor(inst) if self.embed_ready else list(inst), torch.tensor(act)
         else:
             return torch.tensor(rgb).float() / 255, torch.tensor(inst) if self.embed_ready else list(inst), torch.tensor(act)
+
+    # def __getbuffer__(self):
+    #     self.buffer_len -= self.batch_size
+    #     tmp_buffer = {"rgb": [], "inst": [], "act": [], "act_mask": []}
+    #     # import pdb; pdb.set_trace()
+    #     # for k, v in self.buffer.items():
+    #     #     print(k)
+    #     #     for item in v:
+    #     #         print(item.shape)
+    #     if self.buffer_len != 0:
+    #         for k, v in self.buffer.items():
+    #             split_idx = self.buffer_len * self.seq_len
+    #             if k != "act_mask":
+    #                 tmp_buffer[k] = [v[-1][-split_idx:]]
+    #                 self.buffer[k][-1] = v[-1][:-split_idx]
+    #             else:
+    #                 tmp_buffer[k] = [v[-1][-self.buffer_len:]]
+    #                 self.buffer[k][-1] = v[-1][:-self.buffer_len]
+    #     # import pdb; pdb.set_trace()
+    #     # for k, v in self.buffer.items():
+    #     #     print(k)
+    #     #     for item in v:
+    #     #         print(item.shape)
+    #     # for k, v in tmp_buffer.items():
+    #     #     print(k)
+    #     #     for item in v:
+    #     #         print(item.shape)
+    #     act = torch.cat(self.buffer["act"])
+    #     rgb = torch.cat(self.buffer["rgb"])
+    #     if self.embed_ready:
+    #         inst = torch.cat(self.buffer["inst"])
+    #     else:
+    #         inst = self.buffer["inst"]
+    #     act_mask = torch.cat(self.buffer["act_mask"]).long()
+    #     # mask_idx = torch.where(act_mask != 0)
+    #     # import pdb; pdb.set_trace()
+    #     # act_mask = act_mask.numpy()
+    #     # mask_idx = mask_idx[0].numpy()
+    #     # bs_idx = torch.cat([torch.ones(int(act_mask[idx])) * idx for idx in mask_idx]).long()
+    #     # row_idx = torch.cat([torch.arange(self.seq_len - int(act_mask[idx]), self.seq_len) for idx in mask_idx]).long()
+    #     # # import pdb; pdb.set_trace()
+    #     # act_mask = tuple([bs_idx, row_idx])
+    #     self.buffer = tmp_buffer
+    #     # if len(rgb) != self.steps_per_batch or len(inst) != self.steps_per_batch or len(act) != self.steps_per_batch or len(rgb) != self.steps_per_batch:
+    #     #     import pdb; pdb.set_trace()
+    #     return rgb, inst, act, act_mask
 
     def __getbuffer__(self):
         self.buffer_len -= self.batch_size
