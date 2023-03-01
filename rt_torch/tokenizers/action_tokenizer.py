@@ -25,12 +25,12 @@ class ActionTokenizer:
         x = torch.clamp(x, -0.1, 0.1)
         # import pdb
         # pdb.set_trace()
-        x = ((x - self.min) / self.max / 2 * (self.num_action_bin - 1)).int().type(torch.int64) # x < num_action_bin
-        try:
-            x = F.one_hot(x, num_classes=self.num_action_bin)
-        except Exception as e:
-            import pdb
-            pdb.set_trace()
+        x = ((x - self.min) / self.max / 2 * (self.num_action_bin - 1)).int().type(torch.int64).long() # x < num_action_bin
+        # try:
+        #     x = F.one_hot(x, num_classes=self.num_action_bin)
+        # except Exception as e:
+        #     import pdb
+        #     pdb.set_trace()
         return x
 
     def discrete2Scalar(self, x):

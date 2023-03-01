@@ -163,8 +163,13 @@ class language_table_dataset_npz(Dataset):
         print(self.weight)
         print(self.ds_list)
                 
-    def __loaditem__(self, ds_name, index):
+    def __loaditem__(self, ds=None):
         while self.buffer_len < self.batch_size:
+            if ds is None:
+                choice = np.random.choice(len(self.weight), p=self.weight)
+                ds_name = self.ds_list[choice]
+            else:
+                ds_name = ds
             npz_name = str(self.ds_stats[ds_name]["current_idx"] % self.sub_size[ds_name] + self.index_range[ds_name][0]) + ".npz"
             if self.embed_ready:
                 inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
@@ -229,12 +234,10 @@ class language_table_dataset_npz(Dataset):
 
     def __getitem__(self, index):
         if self.ds_type == 'mix':
-            choice = np.random.choice(len(self.weight), p=self.weight)
-            ds_name = self.ds_list[choice]
-            self.__loaditem__(ds_name, index)
+            self.__loaditem__()
         else:
             ds_name = self.ds_type
-            self.__loaditem__(ds_name, index)
+            self.__loaditem__(ds_name)
         rgb, inst, act = self.__getbuffer__()
         if self.embed_ready:
             return rgb, None, act, inst, self.new_ep

@@ -48,6 +48,8 @@ class RT1_transformer(nn.Module):
         self.return_last = return_last
         self.seq_len = seq_len
         self.memory_buffer = None
+        self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, action_max=0.1, action_min=-0.1)
+        self.criterion = nn.CrossEntropyLoss()
 
 
     def token_stack(self, tokens, split_idx, new_ep=False):
@@ -107,3 +109,21 @@ class RT1_transformer(nn.Module):
             return logits
         else:
             return logits[:, -1]
+    
+    def cal_loss(self,
+                 data,
+                 device,
+                 ):
+        rgbs, instructions, actions, inst_embeddings, new_ep = data
+        if isinstance(rgbs, list):
+            rgbs = [rgb.to(device) for rgb in rgbs]
+        else:
+            rgbs.to(device)
+        actions = actions.to(device)
+        actions_discretes = self.action_tokenizer.discretize(actions)
+        if inst_embeddings is not None:
+            inst_embeddings = inst_embeddings.to(device)
+        predicts = self.forward(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings, new_ep=new_ep)
+        predicts = predicts.permute(0, 2, 1)
+        loss = self.criterion(predicts, actions_discretes)
+        return loss

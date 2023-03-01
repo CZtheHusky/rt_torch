@@ -31,7 +31,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--device', default="cuda", type=str)
 parser.add_argument('--device_idx', default="7", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
-parser.add_argument('--batch_size', default=64, type=int, help='batch size')
+parser.add_argument('--batch_size', default=96, type=int, help='batch size')
 parser.add_argument('--num_epoch', default=20, type=int, help='num_epoch')
 parser.add_argument('--norm_clip', default=40, type=int, help='clip norm')
 parser.add_argument('--test_interval', default=1000, type=int, help='test_interval')
@@ -101,10 +101,12 @@ def log_init(args=None):
     handler = logging.FileHandler(logfile, mode='a+')
     handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s - %(message)s')
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+
+    # console_handler = logging.StreamHandler()
+    # console_handler.setLevel(logging.DEBUG)
+    # console_handler.setFormatter(formatter)
+    # logger.addHandler(console_handler)
+
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.info("Start print log")
@@ -252,39 +254,25 @@ def main(args):
     logger.info(f"\nTransformer:")
     getModelSize(model.transformer, logger)
 
-    action_tokenizer = ActionTokenizer(num_action_bin=256, action_max=0.1, action_min=-0.1)
-    criterion = nn.CrossEntropyLoss()
     # embedding_buffer = InstEmbeddingBuffer()
     print(f"split: train-{len(train_loader)}, test-{len(test_loader)}")
     train_loss = deque(maxlen=100)
 
-    # avg_time = {"data_prep": 0, "move_data": 0, "inference": 0, "gradient_step": 0}
+    avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
 
     for epoch in range(epoch_s, num_epoch):
         model.train()
 
-        # time0 = time.time()
+        time0 = time.time()
 
-        for rgbs, instructions, actions, inst_embeddings, new_ep in tqdm(train_loader):
-            # time1 = time.time()
-            if isinstance(rgbs, list):
-                rgbs = [rgb.to(device) for rgb in rgbs]
-            else:
-                rgbs.to(device)
-            actions = actions.to(device)
-            actions_discretes = action_tokenizer.discretize(actions)
-            if inst_embeddings is not None:
-                inst_embeddings = inst_embeddings.to(device)
-            # time2 = time.time()
-            
-            predicts = model(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings, new_ep=new_ep)
+        for data in tqdm(train_loader):
+            time1 = time.time()
+            avg_time["data_prep"] += (time1 - time0)
 
-            # time3 = time.time()
-            # avg_time["data_prep"] += (time1 - time0)
-            # import pdb
-            # pdb.set_trace()
-            loss = criterion(predicts, actions_discretes.float())
-            # torch.autograd.set_detect_anomaly(True)
+            loss = model.cal_loss(data, device)
+
+            time2 = time.time()
+
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), norm_clip)
@@ -293,15 +281,10 @@ def main(args):
                 warmup_scheduler.step()
             elif scheduler is not None:
                 lr_scheduler.step()
-            # torch.cuda.empty_cache()
-            
-            
-        
 
-            # time0 = time.time()
-            # avg_time["move_data"] += (time2 - time1)
-            # avg_time["inference"] += (time3 - time2)
-            # avg_time["gradient_step"] += (time0 - time3)
+            time0 = time.time()
+            avg_time["inference"] += (time2 - time1)
+            avg_time["gradient_step"] += (time0 - time2)
             
             loss_step += 1
             train_loss.append(loss.detach().cpu().numpy())
@@ -312,8 +295,8 @@ def main(args):
                 writer.add_scalar('Train_Loss', float(mean_loss), loss_step)
                 logger.info(f"EP: {epoch}, Loss step: {loss_step}, Loss: {mean_loss:.5f}")
 
-                # for key, value in avg_time.items():
-                #     logger.info(f"{key}: {(value / loss_step):.2f}")
+                for key, value in avg_time.items():
+                    logger.info(f"{key}: {(value / loss_step):.2f}")
 
             if save_interval != 0 and (loss_step) % save_interval == 0:
                 epoch_str = str(epoch)
@@ -334,7 +317,7 @@ def main(args):
                 logger.info(f"check point saved")
                 saved_list = os.listdir(save_path)
                 if len(saved_list) > max_save_num:
-                    sorted(saved_list)
+                    saved_list = sorted(saved_list)
                     oldest = os.path.join(save_path, saved_list[0])
                     logger.info(f"oldest check point removed, path: {oldest}")
                     os.remove(oldest)
@@ -345,17 +328,8 @@ def main(args):
                 with torch.no_grad():
                     indexes = np.random.randint(0, len(test_loader), size=1000)
                     for idx in indexes:
-                        rgbs, instructions, actions, inst_embeddings, new_ep = test_loader.__getitem__(idx)
-                        if isinstance(rgbs, list):
-                            rgbs = [rgb.to(device) for rgb in rgbs]
-                        else:
-                            rgbs.to(device)
-                        actions = actions.to(device)
-                        actions_discretes = action_tokenizer.discretize(actions)
-                    if inst_embeddings is not None:
-                        inst_embeddings = inst_embeddings.to(device)
-                        predicts = model(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings, new_ep=new_ep)
-                        loss = criterion(predicts, actions_discretes.float())
+                        data = test_loader.__getitem__(idx)
+                        loss = model.cal_loss(data, device)
                         num_step += 1
                         test_loss += loss
                         if num_step % 100 == 0:
