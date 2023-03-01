@@ -266,7 +266,7 @@ def main(args):
         # time0 = time.time()
 
         for data in tqdm(train_loader):
-            
+
             # time1 = time.time()
             # avg_time["data_prep"] += (time1 - time0)
 
@@ -296,8 +296,8 @@ def main(args):
                 writer.add_scalar('Train_Loss', float(mean_loss), loss_step)
                 logger.info(f"EP: {epoch}, Loss step: {loss_step}, Loss: {mean_loss:.5f}")
 
-                for key, value in avg_time.items():
-                    logger.info(f"{key}: {(value / loss_step):.2f}")
+                # for key, value in avg_time.items():
+                #     logger.info(f"{key}: {(value / loss_step):.2f}")
 
             if save_interval != 0 and (loss_step) % save_interval == 0:
                 epoch_str = str(epoch)
