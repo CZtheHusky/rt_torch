@@ -141,13 +141,15 @@ class language_table_dataset_npz(Dataset):
             except Exception as e:
                 # self.ds_stats[k] = None
                 # self.index_range[k] = None
-                print(f"dataset {k} not prepared")
+                # print(f"dataset {k} not prepared")
+                pass
         self.indices = {}
         self.bucket = [0]
         for k, v in self.ds_stats.items():
             self.indices[k] = []
             traj_len_path = v["path"]["traj_len"]
             traj_len = np.load(traj_len_path)['arr_0']
+            # traj_len = traj_len[:200]
             current_slice = [0]
             current_len = 0
             # import pdb; pdb.set_trace()
@@ -208,8 +210,12 @@ class language_table_dataset_npz(Dataset):
         self.new_ep = False
         self.next_new_ep = True
         assert len(self.weight) > 0
-        print(self.ds_list)
-        print(self.weight)
+        print(mode)
+        print(f"ds_list: {self.ds_list}")
+        print(f"weight: {self.weight}")
+        print(f"bucket: {self.bucket}")
+        print(f"indices_num: {self.indices_num}")
+
 
 
     def __loaditem__(self, index, ds=None):
@@ -288,11 +294,12 @@ class language_table_dataset_npz(Dataset):
         sub_ds_index = index
         # import pdb; pdb.set_trace()
         for idx in range(0, bucket_len-1):
-            if index <= self.bucket[idx + 1] and index >= self.bucket[idx]:
+            if index < self.bucket[idx + 1] and index >= self.bucket[idx]:
                 break
             else:
                 sub_ds_index -= self.bucket[idx + 1]
         ds_name = self.ds_list[idx]
+        # print(f"ds_type: {self.mode}, ds_name: {ds_name}, sub_ds_index: {sub_ds_index}")
         indice = self.indices[ds_name][sub_ds_index]
         # print("indice:", indice)
         ep_start_idx = indice[0]
@@ -329,10 +336,11 @@ class language_table_dataset_npz(Dataset):
         # print(f"insts: {len(insts)}")
         if ep_start_idx < self.stack_num - 1:
             rgbs[0] = torch.cat([torch.zeros(self.stack_num - ep_start_idx - 1, 3, 300, 300), rgbs[0]])
+            insts = torch.cat([torch.zeros(self.stack_num - ep_start_idx - 1, 768), insts])
         else:
             rgbs[0] = rgbs[0][ep_start_idx - self.stack_num + 1:]
+            insts = insts[ep_start_idx - self.stack_num + 1:]
         acts = acts[ep_start_idx:]
-        insts = insts[ep_start_idx:]
         if ep_end_idx is not None:
             rgbs[-1] = rgbs[-1][:ep_end_idx]
             acts = acts[:ep_end_idx]

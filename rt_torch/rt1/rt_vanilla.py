@@ -52,15 +52,12 @@ class RT1_transformer(nn.Module):
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
 
-    def token_stack(self, tokens, split_idx, new_ep=False):
+    def token_stack(self, tokens, split_idx):
         start_idx = 0
         stacked_list = []
         for ep_idx, idx in enumerate(split_idx):
             current_split = tokens[start_idx:start_idx + idx]
-            if ep_idx == 0:
-                if new_ep:
-                    current_split = torch.cat([tokens[-self.seq_len + 1:], current_split])
-            else:
+            if ep_idx > 0:
                 current_split = torch.cat([tokens[-self.seq_len + 1:], current_split])
             start_idx += idx
             stacked_tokens = torch.stack([current_split[i - self.seq_len:i] for i in range(self.seq_len, len(current_split) + 1)])
@@ -72,7 +69,6 @@ class RT1_transformer(nn.Module):
             self,
             video,
             texts_embeddings=None,
-            new_ep=False,
     ):
         frames = self.seq_len
         split_idx = None
@@ -85,7 +81,7 @@ class RT1_transformer(nn.Module):
                 split_idx.append(len(vid))
             # import pdb; pdb.set_trace()
             video = torch.cat(video, dim=0)
-            # video = torch.cat([video, torch.zeros([self.seq_len - 1, 3, 300, 300]).to(device)])
+            video = torch.cat([video, torch.zeros([self.seq_len - 1, 3, 300, 300]).to(device)])
             # import pdb; pdb.set_trace()
             if not isinstance(texts_embeddings, list):
                 texts_embeddings = torch.cat([texts_embeddings, torch.zeros([self.seq_len - 1, 768]).to(device)])
@@ -98,7 +94,7 @@ class RT1_transformer(nn.Module):
         image_tokens = self.image_tokenizer(video, texts_embeddings)
         # import pdb; pdb.set_trace()
         if split_idx is not None:
-            image_tokens = self.token_stack(image_tokens, split_idx, new_ep)
+            image_tokens = self.token_stack(image_tokens, split_idx)
             image_tokens = rearrange(image_tokens, 'b f n c -> b (f n) c')
         attn_mask = torch.ones((frames * self.num_learned_tokens, frames * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
         

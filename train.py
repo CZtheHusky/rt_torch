@@ -24,6 +24,7 @@ from torch.optim import Adam, SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from warmup_scheduler_pytorch import WarmUpScheduler
 import tensorflow as tf
+from itertools import islice
 
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1."
 
@@ -191,8 +192,8 @@ def main(args):
         stack=False,
         rgb_list=True,
         )
-    train_loader = DataLoader(dataset=train_set, batch_size=1, num_workers=8, shuffle=True)
-    test_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=8, shuffle=True)
+    train_loader = DataLoader(dataset=train_set, batch_size=1, num_workers=8, shuffle=False)
+    test_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=8, shuffle=False)
     # train_loader._create_process()
     # test_loader._create_process()
     model = RT1_transformer(
@@ -238,9 +239,11 @@ def main(args):
         loss_step %= len(train_loader)
         for v, weight in zip(train_loader.ds_stats.values(), train_loader.weight):
             v["current_idx"] = int(loss_step * weight)
+        test_num = state_dict['test_num']
     else:
         loss_step = 0
         epoch_s = 0
+        test_num = 0
     logger.info(f"\nTotal:")
     getModelSize(model, logger)
     logger.info(f"\nfilm_efficientnet_b3:")
@@ -256,21 +259,20 @@ def main(args):
     print(f"split: train-{len(train_loader)}, test-{len(test_loader)}")
     train_loss = deque(maxlen=100)
 
-    avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
-
+    # avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
+    test_num = 0
     for epoch in range(epoch_s, num_epoch):
         model.train()
-
-        time0 = time.time()
-
-        for data in tqdm(train_loader):
-
-            time1 = time.time()
-            avg_time["data_prep"] += (time1 - time0)
+        num = len(train_loader) - (loss_step % len(train_loader))
+        pbar = tqdm(range(num))
+        # time0 = time.time()
+        for data in islice(train_loader, loss_step % len(train_loader), len(train_loader)):
+            # time1 = time.time()
+            # avg_time["data_prep"] += (time1 - time0)
 
             loss = model.cal_loss(data, device)
 
-            time2 = time.time()
+            # time2 = time.time()
 
             optimizer.zero_grad()
             loss.backward()
@@ -281,9 +283,9 @@ def main(args):
             elif scheduler is not None:
                 lr_scheduler.step()
 
-            time0 = time.time()
-            avg_time["inference"] += (time2 - time1)
-            avg_time["gradient_step"] += (time0 - time2)
+            # time0 = time.time()
+            # avg_time["inference"] += (time2 - time1)
+            # avg_time["gradient_step"] += (time0 - time2)
             
             loss_step += 1
             train_loss.append(loss.detach().cpu().numpy())
@@ -294,10 +296,27 @@ def main(args):
                 writer.add_scalar('Train_Loss', float(mean_loss), loss_step)
                 logger.info(f"EP: {epoch}, Loss step: {loss_step}, Loss: {mean_loss:.5f}")
 
-                for key, value in avg_time.items():
-                    logger.info(f"{key}: {(value / loss_step):.2f}")
+                # for key, value in avg_time.items():
+                #     logger.info(f"{key}: {(value / loss_step):.2f}")
 
             if save_interval != 0 and (loss_step) % save_interval == 0:
+                test_loss = 0
+                num_step = 0
+                model.eval()
+                with torch.no_grad():
+                    for data in islice(test_loader, test_num, min((test_num + 1000), len(test_loader))):
+                        loss = model.cal_loss(data, device)
+                        num_step += 1
+                        test_loss += loss
+                        if num_step % 100 == 0:
+                            print(f"Test step: {num_step}, Test_Loss: {test_loss / num_step:.5f}")
+                    test_num += 1000
+                    test_num %= len(test_loader)
+                test_loss /= num_step
+                logger.info(f"EP: {epoch}, Loss step: {loss_step}, Test_Loss: {test_loss:.5f}")
+                writer.add_scalar('Test_Loss', float(test_loss), loss_step)
+                model.train()
+
                 epoch_str = str(epoch)
                 epoch_str = epoch_str.zfill(4)
                 file_name = str(loss_step)
@@ -307,6 +326,7 @@ def main(args):
                     "epoch": epoch,
                     "loss_step": loss_step,
                     "optimizer_state_dict": optimizer.state_dict(),
+                    "test_num": test_num,
                 }
                 if scheduler is not None:
                     dict2save["scheduler"] = lr_scheduler.state_dict()
@@ -320,23 +340,7 @@ def main(args):
                     oldest = os.path.join(save_path, saved_list[0])
                     logger.info(f"oldest check point removed, path: {oldest}")
                     os.remove(oldest)
-
-                test_loss = 0
-                num_step = 0
-                model.eval()
-                with torch.no_grad():
-                    indexes = np.random.randint(0, len(test_loader), size=1000)
-                    for idx in indexes:
-                        data = test_loader.__getitem__(idx)
-                        loss = model.cal_loss(data, device)
-                        num_step += 1
-                        test_loss += loss
-                        if num_step % 100 == 0:
-                            print(f"Test step: {num_step}, Test_Loss: {test_loss / num_step:.5f}")
-                test_loss /= num_step
-                logger.info(f"EP: {epoch}, Loss step: {loss_step}, Test_Loss: {test_loss:.5f}")
-                writer.add_scalar('Test_Loss', float(test_loss), loss_step)
-                model.train()
+            pbar.update(1)
         writer.flush()
     writer.close()
     logger.removeHandler(handler)
