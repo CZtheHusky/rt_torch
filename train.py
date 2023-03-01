@@ -177,26 +177,24 @@ def main(args):
     
     # train_loader = language_table_dataset(dataset_type="train", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
     # test_loader = language_table_dataset(dataset_type="test", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
-    train_loader = language_table_dataset_npz(
+    train_set = language_table_dataset_npz(
         mode="train", 
         ds_type=sub_data, 
         batch_size=batch_size, 
-        weight=[1, 1, 0, 0, 0, 0, 0, 0, 0],
         stack=False,
         rgb_list=True,
         seq_len=seq_len,
         )
-    test_loader = language_table_dataset_npz(
+    test_set = language_table_dataset_npz(
         mode="test", 
         ds_type=sub_data, 
         batch_size=batch_size, 
-        weight=[1, 1, 0, 0, 0, 0, 0, 0, 0],
         stack=False,
         rgb_list=True,
         seq_len=seq_len,
         )
-    # train_loader = DataLoader(dataset=train_set, batch_size=1, shuffle=True)
-    # test_loader = DataLoader(dataset=test_set, batch_size=1)
+    train_loader = DataLoader(dataset=train_set, batch_size=1, shuffle=True, num_workers=8)
+    test_loader = DataLoader(dataset=test_set, batch_size=1, shuffle=True, num_workers=8)
     # train_loader._create_process()
     # test_loader._create_process()
     model = RT1_transformer(
@@ -241,9 +239,11 @@ def main(args):
         loss_step %= len(train_loader)
         for v, weight in zip(train_loader.ds_stats.values(), train_loader.weight):
             v["current_idx"] = int(loss_step * weight)
+        test_step = state_dict['test_step']
     else:
         loss_step = 0
         epoch_s = 0
+        test_step = 0
     logger.info(f"\nTotal:")
     getModelSize(model, logger)
     logger.info(f"\nfilm_efficientnet_b3:")
@@ -263,7 +263,7 @@ def main(args):
 
     for epoch in range(epoch_s, num_epoch):
         model.train()
-
+        
         # time0 = time.time()
 
         for data in tqdm(train_loader):

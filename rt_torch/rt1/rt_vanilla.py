@@ -47,21 +47,20 @@ class RT1_transformer(nn.Module):
         self.act_idx = torch.arange(self.num_learned_tokens - 1, seq_len * self.num_learned_tokens, self.num_learned_tokens)
         self.seq_len = seq_len
         self.memory_buffer = None
-        self.action_tokenizer = ActionTokenizer(num_action_bin=256, action_max=0.1, action_min=-0.1)
+        self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, action_max=0.1, action_min=-0.1)
         self.criterion = nn.CrossEntropyLoss()
 
     def forward(
             self,
             video,
-            texts: Optional[List[str]] = None,
             texts_embeddings=None,
     ):
-        video = rearrange(video, 'b t c h w -> (b t) c h w')
+        # video = rearrange(video, 'b t c h w -> (b t) c h w')
         device = video.device
-        if texts_embeddings is None:
-            texts_embeddings = self.text_tokenizer(texts)
-        else:
-            texts_embeddings = rearrange(texts_embeddings, 'b t d -> (b t) d')
+        if isinstance(texts_embeddings, list):
+            texts_embeddings = self.text_tokenizer(texts_embeddings)
+        # else:
+        #     texts_embeddings = rearrange(texts_embeddings, 'b t d -> (b t) d')
         image_tokens = self.image_tokenizer(video, texts_embeddings)
         # import pdb; pdb.set_trace()
         image_tokens = rearrange(image_tokens, '(b t) n c -> b (t n) c', t=self.seq_len)
@@ -73,16 +72,21 @@ class RT1_transformer(nn.Module):
               data,
               device,
               ):
-        rgbs, instructions, actions, inst_embeddings, act_mask = data
+        rgbs, inst_embeddings, actions, act_mask = data
         rgbs = rgbs.to(device)
         actions = actions.to(device)
         actions_discretes = self.action_tokenizer.discretize(actions)
-        if inst_embeddings is not None:
+        if not isinstance(inst_embeddings, list):
             inst_embeddings = inst_embeddings.to(device)
-        predicts = self.forward(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings)
+        predicts = self.forward(video=rgbs, texts_embeddings=inst_embeddings)
         valid_idx = torch.where(act_mask == 0)
         actions_discretes = actions_discretes.view(-1, self.seq_len, 2)
-        predicts = predicts[valid_idx].permute(0, 2, 1)
+        import pdb; pdb.set_trace()
+        actions_discretes = actions_discretes.view(-1, 2)
+        predicts = predicts.permute(0, 1, 3, 2)
+        predicts = predicts.view(-1, *predicts.shape[2:])
+        predicts = predicts[valid_idx]
         actions_discretes = actions_discretes[valid_idx]
+        
         loss = self.criterion(predicts, actions_discretes)
         return loss
