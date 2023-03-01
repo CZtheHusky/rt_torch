@@ -117,7 +117,6 @@ class TransformerBlocks(nn.Module):
                 max_sequence_len: int = 256,
                 input_embedding_size: int = 512,
                 drop_out_rate: float = 0.1,
-                return_last: bool = True,
                 ) -> None:
         super().__init__()
         self.layers = nn.ModuleList([
@@ -134,11 +133,11 @@ class TransformerBlocks(nn.Module):
             nn.Linear(feed_forward_size, num_actions * vocab_size),
             Rearrange('... (a b) -> ... a b', b=vocab_size),
             )
-        self.return_last = return_last
 
     def forward(self,
                 inputs: torch.Tensor,
                 attention_mask: torch.Tensor,
+                gather_idx: torch.Tensor,
                 ):
         bs = inputs.shape[0]
         seq_len = inputs.shape[1]
@@ -152,8 +151,10 @@ class TransformerBlocks(nn.Module):
 
         for layer in self.layers:
             x = layer(x, attention_mask)
-        if self.return_last:
-            # import pdb; pdb.set_trace()
-            x = x[:, -1]    # b (t n) d
-        return self.output_tokens(x)
+        # import pdb; pdb.set_trace()
+        if gather_idx is not None:
+            gathered_x = x[:, gather_idx]
+            return self.output_tokens(gathered_x)
+        else:
+            return self.output_tokens(x)
 

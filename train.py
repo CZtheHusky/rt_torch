@@ -31,7 +31,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--device', default="cuda", type=str)
 parser.add_argument('--device_idx', default="7", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
-parser.add_argument('--batch_size', default=64, type=int, help='batch size')
+parser.add_argument('--batch_size', default=16, type=int, help='batch size')
 parser.add_argument('--num_epoch', default=20, type=int, help='num_epoch')
 parser.add_argument('--norm_clip', default=40, type=int, help='clip norm')
 parser.add_argument('--test_interval', default=1000, type=int, help='test_interval')
@@ -101,10 +101,12 @@ def log_init(args=None):
     handler = logging.FileHandler(logfile, mode='a+')
     handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s - %(message)s')
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    
+    # console_handler = logging.StreamHandler()
+    # console_handler.setLevel(logging.DEBUG)
+    # console_handler.setFormatter(formatter)
+    # logger.addHandler(console_handler)
+    
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.info("Start print log")
@@ -182,6 +184,7 @@ def main(args):
         weight=[1, 1, 0, 0, 0, 0, 0, 0, 0],
         stack=False,
         rgb_list=True,
+        seq_len=seq_len,
         )
     test_loader = language_table_dataset_npz(
         mode="test", 
@@ -190,6 +193,7 @@ def main(args):
         weight=[1, 1, 0, 0, 0, 0, 0, 0, 0],
         stack=False,
         rgb_list=True,
+        seq_len=seq_len,
         )
     # train_loader = DataLoader(dataset=train_set, batch_size=1, shuffle=True)
     # test_loader = DataLoader(dataset=test_set, batch_size=1)
@@ -209,7 +213,6 @@ def main(args):
             learned_token_num=token_learner_num,
             token_learner_dropout=0.1,
             transformer_dropout=0.1,
-            return_last=True,
     )
     model.to(device)
     optimizer = get_optimizer(args, model)
@@ -265,26 +268,25 @@ def main(args):
 
         # time0 = time.time()
 
-        for rgbs, instructions, actions, inst_embeddings, new_ep in tqdm(train_loader):
+        for rgbs, instructions, actions, inst_embeddings, act_mask in tqdm(train_loader):
+
             # time1 = time.time()
-            if isinstance(rgbs, list):
-                rgbs = [rgb.to(device) for rgb in rgbs]
-            else:
-                rgbs.to(device)
+
+            rgbs = rgbs.to(device)
             actions = actions.to(device)
             actions_discretes = action_tokenizer.discretize(actions)
             if inst_embeddings is not None:
                 inst_embeddings = inst_embeddings.to(device)
+
             # time2 = time.time()
-            
-            predicts = model(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings, new_ep=new_ep)
+
+            predicts = model(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings)
+            valid_idx = torch.where(act_mask == 0)
 
             # time3 = time.time()
             # avg_time["data_prep"] += (time1 - time0)
-            # import pdb
-            # pdb.set_trace()
-            loss = criterion(predicts, actions_discretes.float())
-            # torch.autograd.set_detect_anomaly(True)
+
+            loss = criterion(predicts[valid_idx], actions_discretes[valid_idx].float())
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), norm_clip)
@@ -293,10 +295,6 @@ def main(args):
                 warmup_scheduler.step()
             elif scheduler is not None:
                 lr_scheduler.step()
-            # torch.cuda.empty_cache()
-            
-            
-        
 
             # time0 = time.time()
             # avg_time["move_data"] += (time2 - time1)
@@ -335,7 +333,7 @@ def main(args):
                 saved_list = os.listdir(save_path)
                 if len(saved_list) > max_save_num:
                     sorted(saved_list)
-                    oldest = os.path.join(save_path, saved_list[0])
+                    oldest = os.path.join(save_path, saved_list[-1])
                     logger.info(f"oldest check point removed, path: {oldest}")
                     os.remove(oldest)
 
@@ -345,16 +343,13 @@ def main(args):
                 with torch.no_grad():
                     indexes = np.random.randint(0, len(test_loader), size=1000)
                     for idx in indexes:
-                        rgbs, instructions, actions, inst_embeddings, new_ep = test_loader.__getitem__(idx)
-                        if isinstance(rgbs, list):
-                            rgbs = [rgb.to(device) for rgb in rgbs]
-                        else:
-                            rgbs.to(device)
+                        rgbs, instructions, actions, inst_embeddings, act_mask = test_loader.__getitem__(idx)
+                        rgbs = rgbs.to(device)
                         actions = actions.to(device)
                         actions_discretes = action_tokenizer.discretize(actions)
                     if inst_embeddings is not None:
                         inst_embeddings = inst_embeddings.to(device)
-                        predicts = model(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings, new_ep=new_ep)
+                        predicts = model(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings)
                         loss = criterion(predicts, actions_discretes.float())
                         num_step += 1
                         test_loss += loss

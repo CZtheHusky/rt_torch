@@ -24,7 +24,6 @@ class RT1_transformer(nn.Module):
             learned_token_num=8,
             token_learner_dropout=0.1,
             transformer_dropout=0.1,
-            return_last=True,
     ):
         super().__init__()
         self.action_tokenizer = ActionTokenizer
@@ -43,67 +42,30 @@ class RT1_transformer(nn.Module):
                                              vocab_size=vocab_size, 
                                              input_embedding_size=self.image_embed_dim, 
                                              drop_out_rate=transformer_dropout,
-                                             return_last=return_last,
                                              )
-        self.return_last = return_last
+        self.attn_mask = torch.ones((seq_len * self.num_learned_tokens, seq_len * self.num_learned_tokens), dtype=torch.bool).triu(1)
+        self.act_idx = torch.arange(self.num_learned_tokens - 1, seq_len * self.num_learned_tokens, self.num_learned_tokens)
         self.seq_len = seq_len
         self.memory_buffer = None
-
-
-    def token_stack(self, tokens, split_idx, new_ep=False):
-        start_idx = 0
-        stacked_list = []
-        for ep_idx, idx in enumerate(split_idx):
-            current_split = tokens[start_idx:start_idx + idx]
-            if ep_idx == 0:
-                if new_ep:
-                    current_split = torch.cat([tokens[-self.seq_len + 1:], current_split])
-            else:
-                current_split = torch.cat([tokens[-self.seq_len + 1:], current_split])
-            start_idx += idx
-            stacked_tokens = torch.stack([current_split[i - self.seq_len:i] for i in range(self.seq_len, len(current_split) + 1)])
-            # import pdb; pdb.set_trace()
-            stacked_list.append(stacked_tokens)
-        return torch.cat(stacked_list)
 
     def forward(
             self,
             video,
             texts: Optional[List[str]] = None,
             texts_embeddings=None,
-            new_ep=False,
     ):
         # depth = self.transformer_depth
-        frames = self.seq_len
-        split_idx = None
-        # import pdb; pdb.set_trace()
-        if isinstance(video, list):
-            device = video[0].device
-            split_idx = []
-            for vid in video:
-                split_idx.append(len(vid))
-            # import pdb; pdb.set_trace()
-            video = torch.cat(video, dim=0)
-            video = torch.cat([video, torch.zeros([self.seq_len - 1, 3, 300, 300]).to(device)])
-            if texts_embeddings is not None:
-                texts_embeddings = torch.cat([texts_embeddings, torch.zeros([self.seq_len - 1, 768]).to(device)])
-            else:
-                texts.extend([""] * self.seq_len - 1)
-        else:
-            device = video.device
+        bs = video.shape[0]
+        video = rearrange(video, 'b t c h w -> (b t) c h w')
+        device = video.device
         if texts_embeddings is None:
             texts_embeddings = self.text_tokenizer(texts)
+        else:
+            texts_embeddings = rearrange(texts_embeddings, 'b t d -> (b t) d')
         image_tokens = self.image_tokenizer(video, texts_embeddings)
         # import pdb; pdb.set_trace()
-        if split_idx is not None:
-            image_tokens = self.token_stack(image_tokens, split_idx, new_ep)
-            image_tokens = rearrange(image_tokens, 'b f n c -> b (f n) c')
-        attn_mask = torch.ones((frames * self.num_learned_tokens, frames * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
-        
+        image_tokens = rearrange(image_tokens, '(b t) n c -> b (t n) c', b=bs)
         # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
-        logits = self.transformer(image_tokens, attention_mask=attn_mask)
+        logits = self.transformer(image_tokens, attention_mask=self.attn_mask.to(device), gather_idx=self.act_idx)
         # import pdb; pdb.set_trace()
-        if self.return_last:
-            return logits
-        else:
-            return logits[:, -1]
+        return logits
