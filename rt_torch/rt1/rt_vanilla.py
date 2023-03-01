@@ -49,7 +49,7 @@ class RT1_transformer(nn.Module):
         self.seq_len = seq_len
         self.memory_buffer = None
         self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, action_max=0.1, action_min=-0.1)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
 
     def token_stack(self, tokens, split_idx, new_ep=False):
@@ -71,30 +71,30 @@ class RT1_transformer(nn.Module):
     def forward(
             self,
             video,
-            texts: Optional[List[str]] = None,
             texts_embeddings=None,
             new_ep=False,
     ):
-        # depth = self.transformer_depth
         frames = self.seq_len
         split_idx = None
         # import pdb; pdb.set_trace()
         if isinstance(video, list):
+            # import pdb; pdb.set_trace()
             device = video[0].device
             split_idx = []
             for vid in video:
                 split_idx.append(len(vid))
             # import pdb; pdb.set_trace()
             video = torch.cat(video, dim=0)
-            video = torch.cat([video, torch.zeros([self.seq_len - 1, 3, 300, 300]).to(device)])
-            if texts_embeddings is not None:
+            # video = torch.cat([video, torch.zeros([self.seq_len - 1, 3, 300, 300]).to(device)])
+            # import pdb; pdb.set_trace()
+            if not isinstance(texts_embeddings, list):
                 texts_embeddings = torch.cat([texts_embeddings, torch.zeros([self.seq_len - 1, 768]).to(device)])
             else:
-                texts.extend([""] * self.seq_len - 1)
+                texts_embeddings.extend([""] * self.seq_len - 1)
+                texts_embeddings = self.text_tokenizer(texts_embeddings)
         else:
             device = video.device
-        if texts_embeddings is None:
-            texts_embeddings = self.text_tokenizer(texts)
+        # import pdb; pdb.set_trace()
         image_tokens = self.image_tokenizer(video, texts_embeddings)
         # import pdb; pdb.set_trace()
         if split_idx is not None:
@@ -114,16 +114,19 @@ class RT1_transformer(nn.Module):
                  data,
                  device,
                  ):
-        rgbs, instructions, actions, inst_embeddings, new_ep = data
+        rgbs, instructions, actions = data
         if isinstance(rgbs, list):
-            rgbs = [rgb.to(device) for rgb in rgbs]
+            rgbs = [rgb.to(device) if len(rgb.shape) == 4 else rgb.squeeze(0).to(device) for rgb in rgbs]
         else:
             rgbs.to(device)
+        if len(instructions.shape) == 3:
+            instructions = instructions.squeeze(0)
+            actions = actions.squeeze(0)
         actions = actions.to(device)
         actions_discretes = self.action_tokenizer.discretize(actions)
-        if inst_embeddings is not None:
-            inst_embeddings = inst_embeddings.to(device)
-        predicts = self.forward(video=rgbs, texts=instructions, texts_embeddings=inst_embeddings, new_ep=new_ep)
+        if not isinstance(instructions, list):
+            instructions = instructions.to(device)
+        predicts = self.forward(video=rgbs, texts_embeddings=instructions)
         predicts = predicts.permute(0, 2, 1)
         loss = self.criterion(predicts, actions_discretes)
         return loss

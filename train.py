@@ -177,24 +177,22 @@ def main(args):
     
     # train_loader = language_table_dataset(dataset_type="train", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
     # test_loader = language_table_dataset(dataset_type="test", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
-    train_loader = language_table_dataset_npz(
+    train_set = language_table_dataset_npz(
         mode="train", 
         ds_type=sub_data, 
         batch_size=batch_size, 
-        weight=[1, 1, 0, 0, 0, 0, 0, 0, 0],
         stack=False,
         rgb_list=True,
         )
-    test_loader = language_table_dataset_npz(
+    test_set = language_table_dataset_npz(
         mode="test", 
         ds_type=sub_data, 
         batch_size=batch_size, 
-        weight=[1, 1, 0, 0, 0, 0, 0, 0, 0],
         stack=False,
         rgb_list=True,
         )
-    # train_loader = DataLoader(dataset=train_set, batch_size=1, shuffle=True)
-    # test_loader = DataLoader(dataset=test_set, batch_size=1)
+    train_loader = DataLoader(dataset=train_set, batch_size=1, num_workers=8, shuffle=True)
+    test_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=8, shuffle=True)
     # train_loader._create_process()
     # test_loader._create_process()
     model = RT1_transformer(
@@ -254,25 +252,25 @@ def main(args):
     logger.info(f"\nTransformer:")
     getModelSize(model.transformer, logger)
 
-    # embedding_buffer = InstEmbeddingBuffer()
+
     print(f"split: train-{len(train_loader)}, test-{len(test_loader)}")
     train_loss = deque(maxlen=100)
 
-    # avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
+    avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
 
     for epoch in range(epoch_s, num_epoch):
         model.train()
 
-        # time0 = time.time()
+        time0 = time.time()
 
         for data in tqdm(train_loader):
 
-            # time1 = time.time()
-            # avg_time["data_prep"] += (time1 - time0)
+            time1 = time.time()
+            avg_time["data_prep"] += (time1 - time0)
 
             loss = model.cal_loss(data, device)
 
-            # time2 = time.time()
+            time2 = time.time()
 
             optimizer.zero_grad()
             loss.backward()
@@ -283,9 +281,9 @@ def main(args):
             elif scheduler is not None:
                 lr_scheduler.step()
 
-            # time0 = time.time()
-            # avg_time["inference"] += (time2 - time1)
-            # avg_time["gradient_step"] += (time0 - time2)
+            time0 = time.time()
+            avg_time["inference"] += (time2 - time1)
+            avg_time["gradient_step"] += (time0 - time2)
             
             loss_step += 1
             train_loss.append(loss.detach().cpu().numpy())
@@ -296,8 +294,8 @@ def main(args):
                 writer.add_scalar('Train_Loss', float(mean_loss), loss_step)
                 logger.info(f"EP: {epoch}, Loss step: {loss_step}, Loss: {mean_loss:.5f}")
 
-                # for key, value in avg_time.items():
-                #     logger.info(f"{key}: {(value / loss_step):.2f}")
+                for key, value in avg_time.items():
+                    logger.info(f"{key}: {(value / loss_step):.2f}")
 
             if save_interval != 0 and (loss_step) % save_interval == 0:
                 epoch_str = str(epoch)
