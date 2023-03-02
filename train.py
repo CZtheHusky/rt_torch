@@ -14,7 +14,7 @@ from torchvision.models import EfficientNet_B3_Weights
 from tqdm import tqdm
 from rt_torch.rt1.rt_vanilla import RT1_transformer
 # from rt_torch.rt1.rt_xl import RT1_transformerxl
-from rt_torch.dataset.dataset_npz import language_table_dataset_npz
+from rt_torch.dataset.dataset_npz import build_language_table_ds
 from rt_torch.tokenizers.action_tokenizer import ActionTokenizer
 from collections import defaultdict
 from torch.utils.data import DataLoader
@@ -33,10 +33,13 @@ parser.add_argument('--device', default="cuda", type=str)
 parser.add_argument('--device_idx', default="7", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
 parser.add_argument('--batch_size', default=96, type=int, help='batch size')
-parser.add_argument('--num_epoch', default=20, type=int, help='num_epoch')
+parser.add_argument('--loader_bs', default=1, type=int, help='')
+parser.add_argument('--loader_shuffle', action='store_true', help="load the args")
+parser.add_argument('--loader_worker', default=16, type=int, help='')
+parser.add_argument('--num_epoch', default=5, type=int, help='num_epoch')
 parser.add_argument('--norm_clip', default=40, type=int, help='clip norm')
-parser.add_argument('--test_interval', default=1000, type=int, help='test_interval')
-parser.add_argument('--seed', default=100, type=int, help='seed of numpy, tensorflow and pytorch')
+parser.add_argument('--test_interval', default=10000, type=int, help='test_interval')
+parser.add_argument('--seed', default=100, type=int, help='')
 parser.add_argument('--save_interval', default=10000, type=int)
 parser.add_argument('--alias', default="", type=str, help="alias of the experiment")
 parser.add_argument('--sub_data', default="mix", type=str, help="data for training")
@@ -55,7 +58,7 @@ parser.add_argument('--lr_min', default=1e-5, type=float)
 parser.add_argument('--load_path', default=None, type=str, help="checkpoint path to load")
 parser.add_argument('--load_args', action='store_true', help="load the args")
 parser.add_argument('--optimizer', default="adam", type=str, help="type of the optimizer")
-parser.add_argument('--scheduler', default=None, type=str, help="type of the optimizer")
+parser.add_argument('--scheduler', default=None, type=str, help="")
 parser.add_argument('--warmup', action='store_true', help="using warmup scheduler")
 parser.add_argument('--adam_beta1', default=0.9, type=float, help="")
 parser.add_argument('--adam_beta2', default=0.99, type=float, help="")
@@ -156,7 +159,6 @@ def main(args):
     norm_clip = args.norm_clip
     test_interval = args.test_interval
     seed = args.seed
-    alias = args.alias
     lr_min = args.lr_min
     save_interval = args.save_interval
     max_save_num = args.max_save_num
@@ -174,32 +176,13 @@ def main(args):
     model_dim = args.model_dim
     seq_len = args.seq_len
     token_learner_num = args.token_learner_num
+    loader_shuffle = True if args.loader_shuffle else False
+    loader_bs = args.loader_bs
+
     print('device: ', device)
     
-    # train_loader = language_table_dataset(dataset_type="train", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
-    # test_loader = language_table_dataset(dataset_type="test", sub_data=sub_data, batch_size=batch_size, weight=[1, 1, 0, 0, 0, 0, 0, 0, 0])
-    train_set = language_table_dataset_npz(
-        mode="train", 
-        ds_type=sub_data, 
-        batch_size=batch_size, 
-        stack=False,
-        rgb_list=True,
-        )
-    test_set = language_table_dataset_npz(
-        mode="test", 
-        ds_type=sub_data, 
-        batch_size=batch_size, 
-        stack=False,
-        rgb_list=True,
-        )
-    train_loader = DataLoader(dataset=train_set, batch_size=1, num_workers=8, shuffle=False)
-    test_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=8, shuffle=False)
-    for data in islice(train_loader, 106962, len(train_loader)):
-        rgbs, instructions, actions = data
-        import pdb; pdb.set_trace()
-
-    # train_loader._create_process()
-    # test_loader._create_process()
+    train_set, test_loader = build_language_table_ds(split=0.9, batch_size=batch_size, rgb_list=True, seq_len=seq_len, seed=seed)
+    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=8, shuffle=loader_shuffle)
     model = RT1_transformer(
             num_actions=num_actions,
             vocab_size=vocab_size,
@@ -240,14 +223,11 @@ def main(args):
         optimizer.load_state_dict(state_dict['optimizer_state_dict'])
         if scheduler is not None:
             lr_scheduler.load_state_dict(state_dict['scheduler'])
-        loss_step %= len(train_loader)
         for v, weight in zip(train_loader.ds_stats.values(), train_loader.weight):
             v["current_idx"] = int(loss_step * weight)
-        test_num = state_dict['test_num']
     else:
         loss_step = 0
         epoch_s = 0
-        test_num = 0
     logger.info(f"\nTotal:")
     getModelSize(model, logger)
     logger.info(f"\nfilm_efficientnet_b3:")
@@ -264,7 +244,7 @@ def main(args):
     train_loss = deque(maxlen=100)
 
     # avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
-    test_num = 0
+
     for epoch in range(epoch_s, num_epoch):
         model.train()
         num = len(train_loader) - (loss_step % len(train_loader))
@@ -304,46 +284,16 @@ def main(args):
                 #     logger.info(f"{key}: {(value / loss_step):.2f}")
 
             if save_interval != 0 and (loss_step) % save_interval == 0:
-                test_loss = 0
-                num_step = 0
+                if scheduler is not None:
+                    model.save_check_point(epoch, loss_step, optimizer, save_path, logger, max_save_num, lr_scheduler)
+                else:
+                    model.save_check_point(epoch, loss_step, optimizer, save_path, logger, max_save_num)
+
+            if test_interval != 0 and loss_step % test_interval == 0:
                 model.eval()
-                with torch.no_grad():
-                    for data in islice(test_loader, test_num, min((test_num + 1000), len(test_loader))):
-                        loss = model.cal_loss(data, device)
-                        num_step += 1
-                        test_loss += loss
-                        if num_step % 100 == 0:
-                            print(f"Test step: {num_step}, Test_Loss: {test_loss / num_step:.5f}")
-                    test_num += 1000
-                    test_num %= len(test_loader)
-                test_loss /= num_step
-                logger.info(f"EP: {epoch}, Loss step: {loss_step}, Test_Loss: {test_loss:.5f}")
-                writer.add_scalar('Test_Loss', float(test_loss), loss_step)
+                model.test(test_loader, device, logger, writer, epoch, loss_step)
                 model.train()
 
-                epoch_str = str(epoch)
-                epoch_str = epoch_str.zfill(4)
-                file_name = str(loss_step)
-                file_name = epoch_str + "_" + file_name.zfill(10)
-                dict2save = {
-                    "model_state_dict": model.state_dict(),
-                    "epoch": epoch,
-                    "loss_step": loss_step,
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "test_num": test_num,
-                }
-                if scheduler is not None:
-                    dict2save["scheduler"] = lr_scheduler.state_dict()
-                torch.save(dict2save,
-                    os.path.join(save_path, file_name + '.pt')
-                )
-                logger.info(f"check point saved")
-                saved_list = os.listdir(save_path)
-                if len(saved_list) > max_save_num:
-                    saved_list = sorted(saved_list)
-                    oldest = os.path.join(save_path, saved_list[0])
-                    logger.info(f"oldest check point removed, path: {oldest}")
-                    os.remove(oldest)
             pbar.update(1)
         writer.flush()
     writer.close()
@@ -394,5 +344,4 @@ if __name__ == "__main__":
             # Create a new Namespace object from the saved arguments
             print("loading args")
             args = argparse.Namespace(**args_dict)
-    
     main(args)
