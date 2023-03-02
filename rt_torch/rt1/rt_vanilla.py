@@ -73,6 +73,11 @@ class RT1_transformer(nn.Module):
               device,
               ):
         rgbs, inst_embeddings, actions, act_mask = data
+        if len(inst_embeddings.shape) == 3:
+            rgbs = rgbs.squeeze(0)
+            inst_embeddings = inst_embeddings.squeeze(0)
+            actions = actions.squeeze(0)
+            act_mask = act_mask.squeeze(0)
         rgbs = rgbs.to(device)
         actions = actions.to(device)
         actions_discretes = self.action_tokenizer.discretize(actions)
@@ -80,9 +85,7 @@ class RT1_transformer(nn.Module):
             inst_embeddings = inst_embeddings.to(device)
         predicts = self.forward(video=rgbs, texts_embeddings=inst_embeddings)
         valid_idx = torch.where(act_mask == 0)
-        actions_discretes = actions_discretes.view(-1, self.seq_len, 2)
-        import pdb; pdb.set_trace()
-        actions_discretes = actions_discretes.view(-1, 2)
+        # import pdb; pdb.set_trace()
         predicts = predicts.permute(0, 1, 3, 2)
         predicts = predicts.view(-1, *predicts.shape[2:])
         predicts = predicts[valid_idx]

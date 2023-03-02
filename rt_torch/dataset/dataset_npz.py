@@ -11,6 +11,7 @@ from multiprocessing import Process, Pipe, Queue
 from multiprocessing.connection import Connection
 import os
 from math import ceil
+from torch.utils.data import DataLoader
 
 INPUT_SIZE = 300
 
@@ -128,10 +129,35 @@ class language_table_dataset_npz(Dataset):
             traj_len_path = v["path"]["traj_len"]
             traj_len = np.load(traj_len_path)['arr_0']
             # traj_len = traj_len[:200]
+
             current_slice = [0]
             current_len = 0
+
             # import pdb; pdb.set_trace()
             done = True
+
+
+            # for idx, item in enumerate(traj_len):
+            #     remainder = item % seq_len
+            #     if remainder != 0:
+            #         pad_num = seq_len - remainder
+            #         item += pad_num
+            #     tmp_item = item
+            #     split_num = tmp_item / seq_len
+            #     while split_num > 0:
+            #         current_slice.append(idx)
+            #         end_idx = current_slice[0] + self.seq_len
+            #         neg_end_idx = end_idx - tmp_item
+            #         if neg_end_idx != 0:
+            #             current_slice.append(neg_end_idx)
+            #             self.indices[k].append(current_slice)
+            #             current_slice = [end_idx]
+            #         else:
+            #             current_slice.append(None)
+            #             self.indices[k].append(current_slice)
+            #             current_slice = [0]
+            #         split_num -= 1
+
             for idx, item in enumerate(traj_len):
                 remainder = item % seq_len
                 if remainder != 0:
@@ -153,13 +179,14 @@ class language_table_dataset_npz(Dataset):
                     current_len = 0
                     current_slice = [0]
                     done = True
-            # import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace()
             if not done:
                 if item % seq_len != 0:
                     pad_num = seq_len - item % seq_len
                     item += pad_num
                 current_slice.append(item)
                 self.indices[k].append(np.array(current_slice))
+
             total_indice_num = len(self.indices[k])
             train_indice_num = int(total_indice_num * split)
             test_indice_num = total_indice_num - train_indice_num
@@ -278,14 +305,16 @@ class language_table_dataset_npz(Dataset):
         insts = insts[ep_start_idx:]
         rgbs = rgbs[ep_start_idx:]
         acts = acts[ep_start_idx:]
+        act_mask = act_mask[ep_start_idx:]
         if ep_end_idx is not None:
             rgbs = rgbs[:ep_end_idx]
             acts = acts[:ep_end_idx]
             insts = insts[:ep_end_idx]
+            act_mask = act_mask[:ep_end_idx]
 
-        # if total != len(insts) + 5:
+        # if len(insts) != self.batch_size or len(rgbs) != self.batch_size or len(acts) != self.batch_size or len(act_mask) != self.batch_size:
         #     [print(len(rgb)) for rgb in rgbs] 
-        #     import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         return rgbs, insts, acts, act_mask
             
         
@@ -300,14 +329,12 @@ if __name__ == "__main__":
     from tqdm import tqdm
     import os
     os.environ['CUDA_VISIBLE_DEVICES'] = ''
-    train_loader = language_table_dataset_npz(mode="train", ds_type='mix', batch_size=16)
-    test_loader = language_table_dataset_npz(mode="test", ds_type='mix', batch_size=16)
-    print("get pbar")
-    print(len(train_loader))
-    print(len(test_loader))
-    pbar = tqdm(range(len(train_loader)))
-    print("start iteration")
-    train_loader.__getitem__()
+    train_set = language_table_dataset_npz(mode="train", ds_type='mix')
+    test_set = language_table_dataset_npz(mode="test", ds_type='mix')
+    train_loader = DataLoader(dataset=train_set, batch_size=16, num_workers=16, shuffle=True)
+    test_loader = DataLoader(dataset=test_set, batch_size=16, num_workers=16, shuffle=True)
+    for data in tqdm(train_loader):
+        rgbs, inst_embeddings, actions, act_mask = data
     # for epoch in range(2):
     #     for idx, item in enumerate(train_loader):
     #         pbar.update(1)
