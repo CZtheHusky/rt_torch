@@ -6,6 +6,8 @@ from rt_torch.tokenizers.text_tokenizer import TextTokenizer
 from einops import repeat, reduce, rearrange
 from torch import nn
 import torch
+import numpy as np
+import os
 # Robotic Transformer
 
 class RT1_transformer(nn.Module):
@@ -93,3 +95,50 @@ class RT1_transformer(nn.Module):
         
         loss = self.criterion(predicts, actions_discretes)
         return loss
+
+    def test(self,
+             test_set,
+             device,
+             logger,
+             writer,
+             epoch,
+             loss_step,
+             test_size=1000,
+             ):
+        test_loss = 0
+        num_step = 0
+        with torch.no_grad():
+            # import pdb; pdb.set_trace()
+            test_idx = np.random.randint(len(test_set), size=test_size)
+            for idx in test_idx:
+                data = test_set.__getitem__(idx)
+                loss = self.cal_loss(data, device)
+                num_step += 1
+                test_loss += loss
+        test_loss /= num_step
+        logger.info(f"EP: {epoch}, Loss step: {loss_step}, Test_Loss: {test_loss:.5f}")
+        writer.add_scalar('Test_Loss', float(test_loss), loss_step)
+
+    def save_check_point(self, epoch, loss_step, optimizer, save_path, logger, max_save_num, lr_scheduler=None):
+        epoch_str = str(epoch)
+        epoch_str = epoch_str.zfill(4)
+        file_name = str(loss_step)
+        file_name = epoch_str + "_" + file_name.zfill(10)
+        dict2save = {
+            "model_state_dict": self.state_dict(),
+            "epoch": epoch,
+            "loss_step": loss_step,
+            "optimizer_state_dict": optimizer.state_dict(),
+        }
+        if lr_scheduler is not None:
+            dict2save["scheduler"] = lr_scheduler.state_dict()
+        torch.save(dict2save,
+            os.path.join(save_path, file_name + '.pt')
+        )
+        logger.info(f"check point saved")
+        saved_list = os.listdir(save_path)
+        if len(saved_list) > max_save_num:
+            saved_list = sorted(saved_list)
+            oldest = os.path.join(save_path, saved_list[0])
+            logger.info(f"oldest check point removed, path: {oldest}")
+            os.remove(oldest)
