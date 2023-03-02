@@ -119,29 +119,7 @@ class language_table_dataset_npz(Dataset):
                     "num_ep": size,
                     "current_idx": 0,
                 }
-                # if self.mode == 0:
-                #     ds_traj_len = traj_len[:train_size].sum()
-                #     self.index_range[k] = [0, train_size]
-                #     self.step_size += ds_traj_len
-                #     self.sub_len[k] = ds_traj_len
-                #     self.sub_size[k] = train_size
-                # else:
-                #     ds_traj_len = traj_len[train_size:].sum()
-                #     self.index_range[k] = [train_size, size]
-                #     self.step_size += ds_traj_len
-                #     self.sub_len[k] = ds_traj_len
-                #     self.sub_size[k] = test_size
-
-                # if weight is None:
-                #     self.weight.append(self.sub_len[k])
-                #     self.ds_list.append(k)
-                # elif weight[idx] != 0:
-                #     self.ds_list.append(k)
-                #     self.weight.append(weight[idx])
             except Exception as e:
-                # self.ds_stats[k] = None
-                # self.index_range[k] = None
-                # print(f"dataset {k} not prepared")
                 pass
         self.indices = {}
         self.bucket = [0]
@@ -157,24 +135,25 @@ class language_table_dataset_npz(Dataset):
             for idx, item in enumerate(traj_len):
                 current_len += item
                 current_slice.append(idx)
-                if current_len > self.batch_size:
-                    extra = current_len - self.batch_size
-                    current_slice.append(-extra)
-                    self.indices[k].append(current_slice)
-                    current_slice = [item - extra]
-                    current_slice.append(idx)
-                    current_len = extra
-                    done = False
-                elif current_len == self.batch_size:
-                    current_slice.append(None)
-                    self.indices[k].append(current_slice)
-                    current_len = 0
-                    current_slice = [0]
-                    done = True
-            # import pdb; pdb.set_trace()
+                while current_len >= self.batch_size:
+                    if current_len == self.batch_size:
+                        current_slice.append(None)
+                        self.indices[k].append(current_slice)
+                        current_len = 0
+                        current_slice = [0]
+                        done = True
+                    else:
+                        extra = current_len - self.batch_size
+                        current_slice.append(-extra)
+                        self.indices[k].append(current_slice)
+                        current_slice = [item - extra]
+                        current_slice.append(idx)
+                        current_len = extra
+                        done = False
             if not done:
                 current_slice.append(item)
-                self.indices[k].append(np.array(current_slice))
+                self.indices[k].append(current_slice)
+            # import pdb; pdb.set_trace()
             total_indice_num = len(self.indices[k])
             train_indice_num = int(total_indice_num * split)
             test_indice_num = total_indice_num - train_indice_num
@@ -218,28 +197,28 @@ class language_table_dataset_npz(Dataset):
 
 
 
-    def __loaditem__(self, index, ds=None):
-        while self.buffer_len < self.batch_size:
-            if ds is None:
-                choice = np.random.choice(len(self.weight), p=self.weight)
-                ds_name = self.ds_list[choice]
-            else:
-                ds_name = ds
-            npz_name = str(self.ds_stats[ds_name]["current_idx"] % self.sub_size[ds_name] + self.index_range[ds_name][0]) + ".npz"
-            if self.embed_ready:
-                inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
-            else:
-                inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["instruction"], npz_name))['arr_0']
-            rgb = np.load(os.path.join(self.ds_stats[ds_name]["path"]["rgb"], npz_name))['arr_0']
-            act = np.load(os.path.join(self.ds_stats[ds_name]["path"]["action"], npz_name))['arr_0']
-            self.buffer_len += len(rgb)
-            # print(f"add {len(rgb)} into buffer: {self.buffer_len}")
-            rgb, inst, act = self.return_preprocess(rgb, inst, act)
-            self.buffer["rgb"].append(rgb)
-            self.buffer["inst"].append(inst)
-            self.buffer['act'].append(act)
-            self.ds_stats[ds_name]["current_idx"] += 1
-            self.ds_stats[ds_name]["current_idx"] %= self.sub_size[ds_name]
+    # def __loaditem__(self, index, ds=None):
+    #     while self.buffer_len < self.batch_size:
+    #         if ds is None:
+    #             choice = np.random.choice(len(self.weight), p=self.weight)
+    #             ds_name = self.ds_list[choice]
+    #         else:
+    #             ds_name = ds
+    #         npz_name = str(self.ds_stats[ds_name]["current_idx"] % self.sub_size[ds_name] + self.index_range[ds_name][0]) + ".npz"
+    #         if self.embed_ready:
+    #             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
+    #         else:
+    #             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["instruction"], npz_name))['arr_0']
+    #         rgb = np.load(os.path.join(self.ds_stats[ds_name]["path"]["rgb"], npz_name))['arr_0']
+    #         act = np.load(os.path.join(self.ds_stats[ds_name]["path"]["action"], npz_name))['arr_0']
+    #         self.buffer_len += len(rgb)
+    #         # print(f"add {len(rgb)} into buffer: {self.buffer_len}")
+    #         rgb, inst, act = self.return_preprocess(rgb, inst, act)
+    #         self.buffer["rgb"].append(rgb)
+    #         self.buffer["inst"].append(inst)
+    #         self.buffer['act'].append(act)
+    #         self.ds_stats[ds_name]["current_idx"] += 1
+    #         self.ds_stats[ds_name]["current_idx"] %= self.sub_size[ds_name]
             
 
     def return_preprocess(self, rgb, inst, act):
@@ -250,41 +229,41 @@ class language_table_dataset_npz(Dataset):
             # return torch.cat([torch.zeros((self.stack_num - 1, 3, 300, 300)), torch.tensor(rgb).float() / 255]), torch.cat([torch.zeros((self.stack_num - 1, 768)), torch.tensor(inst)]) if self.embed_ready  else list(inst), torch.tensor(act)
             return torch.tensor(rgb).float() / 255, torch.tensor(inst) if self.embed_ready else list(inst), torch.tensor(act)
 
-    def __getbuffer__(self):
-        self.buffer_len -= self.batch_size
-        # print("remove from buffer:", self.buffer_len)
-        tmp_buffer = {"rgb": [], "inst": [], "act": []}
-        self.new_ep = self.next_new_ep
-        if self.buffer_len > 0:
-            self.next_new_ep = False
-            for k, v in self.buffer.items():
-                if k != "act":
-                    reserve_len = self.buffer_len + self.stack_num - 1
-                    if len(v[-1]) < reserve_len:
-                        # import pdb; pdb.set_trace()
-                        if k == "rgb":
-                            tmp_buffer[k] = [torch.cat([torch.zeros([reserve_len - len(v[-1]), 3, 300, 300]), v[-1]])]
-                        else:
-                            tmp_buffer[k] = [torch.cat([torch.zeros([reserve_len - len(v[-1]), 768]), v[-1]])]
-                    else:
-                        tmp_buffer[k] = [v[-1][-reserve_len:]]
-                else:
-                    tmp_buffer[k] = [v[-1][-(self.buffer_len):]]
-                v[-1] = v[-1][:-self.buffer_len]
-        else:
-            self.next_new_ep = True
-        if self.rgb_list:
-            rgb = self.buffer["rgb"]
-        else:
-            rgb = torch.cat(self.buffer["rgb"], dim=0)
-        if isinstance(self.buffer["inst"][0], list):
-            inst = []
-            [inst.extend(sub_list) for sub_list in self.buffer["inst"]]
-        else:
-            inst = torch.cat(self.buffer["inst"], dim=0)
-        act = torch.cat(self.buffer["act"], dim=0)
-        self.buffer = tmp_buffer
-        return rgb, inst, act
+    # def __getbuffer__(self):
+    #     self.buffer_len -= self.batch_size
+    #     # print("remove from buffer:", self.buffer_len)
+    #     tmp_buffer = {"rgb": [], "inst": [], "act": []}
+    #     self.new_ep = self.next_new_ep
+    #     if self.buffer_len > 0:
+    #         self.next_new_ep = False
+    #         for k, v in self.buffer.items():
+    #             if k != "act":
+    #                 reserve_len = self.buffer_len + self.stack_num - 1
+    #                 if len(v[-1]) < reserve_len:
+    #                     # import pdb; pdb.set_trace()
+    #                     if k == "rgb":
+    #                         tmp_buffer[k] = [torch.cat([torch.zeros([reserve_len - len(v[-1]), 3, 300, 300]), v[-1]])]
+    #                     else:
+    #                         tmp_buffer[k] = [torch.cat([torch.zeros([reserve_len - len(v[-1]), 768]), v[-1]])]
+    #                 else:
+    #                     tmp_buffer[k] = [v[-1][-reserve_len:]]
+    #             else:
+    #                 tmp_buffer[k] = [v[-1][-(self.buffer_len):]]
+    #             v[-1] = v[-1][:-self.buffer_len]
+    #     else:
+    #         self.next_new_ep = True
+    #     if self.rgb_list:
+    #         rgb = self.buffer["rgb"]
+    #     else:
+    #         rgb = torch.cat(self.buffer["rgb"], dim=0)
+    #     if isinstance(self.buffer["inst"][0], list):
+    #         inst = []
+    #         [inst.extend(sub_list) for sub_list in self.buffer["inst"]]
+    #     else:
+    #         inst = torch.cat(self.buffer["inst"], dim=0)
+    #     act = torch.cat(self.buffer["act"], dim=0)
+    #     self.buffer = tmp_buffer
+    #     return rgb, inst, act
     
 
 
@@ -381,8 +360,8 @@ if __name__ == "__main__":
     from tqdm import tqdm
     import os
     os.environ['CUDA_VISIBLE_DEVICES'] = ''
-    train_loader = language_table_dataset_npz(mode="train", ds_type='mix', batch_size=16)
-    test_loader = language_table_dataset_npz(mode="test", ds_type='mix', batch_size=16)
+    train_loader = language_table_dataset_npz(mode="train", ds_type='mix', batch_size=96)
+    test_loader = language_table_dataset_npz(mode="test", ds_type='mix', batch_size=96)
     print("get pbar")
     print(len(train_loader))
     print(len(test_loader))

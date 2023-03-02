@@ -194,6 +194,10 @@ def main(args):
         )
     train_loader = DataLoader(dataset=train_set, batch_size=1, num_workers=8, shuffle=False)
     test_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=8, shuffle=False)
+    for data in islice(train_loader, 106962, len(train_loader)):
+        rgbs, instructions, actions = data
+        import pdb; pdb.set_trace()
+
     # train_loader._create_process()
     # test_loader._create_process()
     model = RT1_transformer(
