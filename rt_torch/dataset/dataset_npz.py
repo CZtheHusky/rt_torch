@@ -69,7 +69,8 @@ sub_datas = ["mix"] + list(dataset_paths.keys())
 
 
 def build_language_table_ds(split=0.9, batch_size=16, rgb_list=True, seq_len=6, seed=100):
-    np.random.seed(seed)
+    if seed:
+        np.random.seed(seed)
     ds_stats = {}
     for idx, (k, v) in enumerate(dataset_paths.items()):
         obs_path = v + "/observations"
@@ -133,14 +134,15 @@ def build_language_table_ds(split=0.9, batch_size=16, rgb_list=True, seq_len=6, 
                     current_len = extra
                     done = False
         if not done:
-            current_slice.append(item)
+            current_slice.append(None)
             indices[k].append(current_slice)
         # import pdb; pdb.set_trace()
         total_indice_num = len(indices[k])
         train_indice_num = int(total_indice_num * split)
         indices_index[k] = {"train": None, "test": None}
         total_indexes = np.arange(total_indice_num)
-        np.random.shuffle(total_indexes)
+        if seed:
+            np.random.shuffle(total_indexes)
         indices_index[k]["train"] = total_indexes[:train_indice_num]
         indices_index[k]["test"] = total_indexes[train_indice_num:]
 
@@ -188,24 +190,22 @@ class language_table_dataset_npz(Dataset):
                 sub_ds_index -= self.bucket[idx + 1]
         ds_name = self.ds_list[idx]
         assert sub_ds_index >=0 and sub_ds_index <= self.sub_ds_len[idx]
-        # print(f"ds_type: {self.mode}, ds_name: {ds_name}, sub_ds_index: {sub_ds_index}")
         indice_idx = self.indices_index[ds_name][self.mode][sub_ds_index]
         indice = self.indices[ds_name][indice_idx]
-        # print("indice:", indice)
+        indice_detail = f"ds_type: {self.mode}, ds_name: {ds_name}, sub_ds_index: {sub_ds_index}, indice:{indice}\n"
         ep_start_idx = indice[0]
         ep_end_idx = indice[-1]
         rgbs = []
         acts = []
         insts = []
+        loading_details = ""
         for id_idx in range(1, len(indice) - 1):
             # import pdb; pdb.set_trace()
             npz_name = str(indice[id_idx]) + '.npz'
             rgb = np.load(os.path.join(self.ds_stats[ds_name]["path"]["rgb"], npz_name))['arr_0']
-            # print(f"loading rgb {npz_name}, length: {len(rgb)}")
             act = np.load(os.path.join(self.ds_stats[ds_name]["path"]["action"], npz_name))['arr_0']
-            # print(f"loading act {npz_name}, length: {len(act)}")
             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
-            # print(f"loading inst {npz_name}, length: {len(inst)}")
+            loading_details += f"loading {npz_name}, rgb: {len(rgb)}, inst: {len(inst)}, act: {len(act)}\n"
             rgb, inst, act = self.return_preprocess(rgb, inst, act)   
             rgbs.append(rgb)
             acts.append(act)
@@ -218,13 +218,13 @@ class language_table_dataset_npz(Dataset):
         else:
             insts = torch.cat(insts)
         # import pdb; pdb.set_trace()
-        # print(f"rgbs: {len(rgbs)}")
-        # print(f"acts: {len(acts)}")
-        # print(f"insts: {len(insts)}")
+        padding_detail = "padding: "
         if ep_start_idx < self.seq_len - 1:
             rgbs[0] = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 3, 300, 300), rgbs[0]])
             insts = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 768), insts])
+            padding_detail += f"length {self.seq_len - ep_start_idx}\n"
         else:
+            padding_detail += f"None\n"
             rgbs[0] = rgbs[0][ep_start_idx - self.seq_len + 1:]
             insts = insts[ep_start_idx - self.seq_len + 1:]
         acts = acts[ep_start_idx:]
@@ -232,13 +232,14 @@ class language_table_dataset_npz(Dataset):
             rgbs[-1] = rgbs[-1][:ep_end_idx]
             acts = acts[:ep_end_idx]
             insts = insts[:ep_end_idx]
-        # total = 0
-        # for rgb in rgbs:
-        #     total += len(rgb)
-
-        # if total != len(insts) + 5:
-        #     [print(len(rgb)) for rgb in rgbs] 
-        #     import pdb; pdb.set_trace()
+        total = 0
+        for rgb in rgbs:
+            total += len(rgb)
+        post_process_detail = f"post processed, rgb: {total}, inst: {len(inst)}, act: {len(act)}\n"
+        # print(indice_detail + loading_details + padding_detail + post_process_detail)
+        if total != len(insts) or total != len(acts) + 5:
+            print(indice_detail + loading_details + padding_detail + post_process_detail)
+            # import pdb; pdb.set_trace()
         return rgbs, insts, acts
             
         
@@ -247,25 +248,6 @@ class language_table_dataset_npz(Dataset):
      
     def __len__(self):
         return self.len
-
-        
-            # if mode == 0:
-            #     index_range[k] = [0, train_indice_num]
-            #     indices_num += train_indice_num
-            #     sub_len[k] = train_indice_num
-            #     bucket.append(train_indice_num + bucket[-1])
-            # else:
-            #     index_range[k] = [train_indice_num, total_indice_num]
-            #     indices_num += test_indice_num
-            #     sub_len[k] = test_indice_num
-            #     bucket.append(test_indice_num + bucket[-1])
-
-            # if weight is None:
-            #     weight.append(sub_len[k])
-            #     ds_list.append(k)
-            # elif weight[idx] != 0:
-            #     ds_list.append(k)
-            #     weight.append(weight[idx])
 
 
 # class language_table_dataset_npz(Dataset):
@@ -472,17 +454,13 @@ if __name__ == "__main__":
     from tqdm import tqdm
     import os
     os.environ['CUDA_VISIBLE_DEVICES'] = ''
-    train_loader = language_table_dataset_npz(mode="train", ds_type='mix', batch_size=96)
-    test_loader = language_table_dataset_npz(mode="test", ds_type='mix', batch_size=96)
-    print("get pbar")
-    print(len(train_loader))
-    print(len(test_loader))
-    pbar = tqdm(range(len(train_loader)))
-    print("start iteration")
-    train_loader.__getitem__()
-    # for epoch in range(2):
-    #     for idx, item in enumerate(train_loader):
-    #         pbar.update(1)
+    train_set, test_set = build_language_table_ds(split=0.9, batch_size=96, rgb_list=True, seq_len=6, seed=None)
+    train_loader = DataLoader(dataset=train_set, batch_size=1, num_workers=32, shuffle=False)
+    test_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=32, shuffle=False)
+    for item in tqdm(train_loader):
+        pass
+    for item in tqdm(test_loader):
+        pass
 
     # train_loader = language_table_dataset(dataset_type="train", sub_data='mix', batch_size=1, weight=[1, 1, ] + [0] * 7)
     # test_loader = language_table_dataset(dataset_type="test", sub_data='mix', batch_size=1, weight=[1, 1, ] + [0] * 7)

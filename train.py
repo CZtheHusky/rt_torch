@@ -178,11 +178,12 @@ def main(args):
     token_learner_num = args.token_learner_num
     loader_shuffle = True if args.loader_shuffle else False
     loader_bs = args.loader_bs
+    loader_worker = args.loader_worker
 
     print('device: ', device)
     
     train_set, test_loader = build_language_table_ds(split=0.9, batch_size=batch_size, rgb_list=True, seq_len=seq_len, seed=seed)
-    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=8, shuffle=loader_shuffle)
+    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
     model = RT1_transformer(
             num_actions=num_actions,
             vocab_size=vocab_size,
