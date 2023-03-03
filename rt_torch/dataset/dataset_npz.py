@@ -138,7 +138,7 @@ def build_language_table_ds(split=0.9, batch_size=16, rgb_list=True, seq_len=6, 
                     current_len = extra
                     done = False
         if not done:
-            current_slice.append(item)
+            current_slice.append(None)
             indices[k].append(current_slice)
         # import pdb; pdb.set_trace()
         total_indice_num = len(indices[k])
