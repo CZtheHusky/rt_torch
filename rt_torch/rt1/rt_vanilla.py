@@ -8,6 +8,7 @@ from torch import nn
 import torch
 import os
 import numpy as np
+from torch.distributed import get_rank
 # Robotic Transformer
 
 class RT1_transformer(nn.Module):
@@ -57,7 +58,12 @@ class RT1_transformer(nn.Module):
     def token_stack(self, tokens, split_idx):
         start_idx = 0
         stacked_list = []
-        for ep_idx, idx in enumerate(split_idx):
+        for ep_idx in range(len(split_idx)):
+            idx = int(split_idx[ep_idx].item())
+            # print(idx)
+            # print(idx.dtype)
+            if idx == -1:
+                continue
             current_split = tokens[start_idx:start_idx + idx]
             if ep_idx > 0:
                 current_split = torch.cat([tokens[-self.seq_len + 1:], current_split])
@@ -69,62 +75,60 @@ class RT1_transformer(nn.Module):
 
     def forward(
             self,
-            video,
-            texts_embeddings=None,
+            data,
     ):
-        frames = self.seq_len
-        split_idx = None
+        frames, texts_embeddings, actions, split_idx = data
+        rgb_size, embedding_size, action_size, split_idx_size = frames.shape, texts_embeddings.shape, actions.shape, split_idx.shape
+        # print(f"rank: {get_rank()}, inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
+        device = frames.device
         # import pdb; pdb.set_trace()
-        if isinstance(video, list):
-            # import pdb; pdb.set_trace()
-            device = video[0].device
-            split_idx = []
-            for vid in video:
-                split_idx.append(len(vid))
-            # import pdb; pdb.set_trace()
-            video = torch.cat(video, dim=0)
-            video = torch.cat([video, torch.zeros([self.seq_len - 1, 3, 300, 300]).to(device)])
-            # import pdb; pdb.set_trace()
-            if not isinstance(texts_embeddings, list):
-                texts_embeddings = torch.cat([texts_embeddings, torch.zeros([self.seq_len - 1, 768]).to(device)])
-            else:
-                texts_embeddings.extend([""] * self.seq_len - 1)
-                texts_embeddings = self.text_tokenizer(texts_embeddings)
+        frames = torch.cat([frames, torch.zeros([self.seq_len - 1, *frames.shape[1:]], dtype=frames.dtype).to(device)])
+        # import pdb; pdb.set_trace()
+        if not isinstance(texts_embeddings, list):
+            texts_embeddings = torch.cat([texts_embeddings, torch.zeros([self.seq_len - 1, *texts_embeddings.shape[1:]], dtype=texts_embeddings.dtype).to(device)])
         else:
-            device = video.device
+            texts_embeddings.extend([""] * self.seq_len - 1)
+            texts_embeddings = self.text_tokenizer(texts_embeddings)
         # import pdb; pdb.set_trace()
-        image_tokens = self.image_tokenizer(video, texts_embeddings)
+        # print(f"rank: {get_rank()}, inference, frames: {frames.shape}, texts_embeddings: {texts_embeddings.shape}")
+        image_tokens = self.image_tokenizer(frames, texts_embeddings)
+        # print(f"rank: {get_rank()}, inference, image_tokens: {image_tokens.shape}")
         # import pdb; pdb.set_trace()
         if split_idx is not None:
             image_tokens = self.token_stack(image_tokens, split_idx)
             image_tokens = rearrange(image_tokens, 'b f n c -> b (f n) c')
-        attn_mask = torch.ones((frames * self.num_learned_tokens, frames * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
+        # print(f"rank: {get_rank()}, inference, stacked_image_tokens: {image_tokens.shape}")
+        attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
         
         # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
         # import pdb; pdb.set_trace()
-        if self.return_last:
-            return logits
-        else:
-            return logits[:, -1]
+        if not self.return_last:
+            logits = logits[:, -1]
+        logits = logits.permute(0, 2, 1)
+        actions_discretes = self.action_tokenizer.discretize(actions)
+        # print(f"rank: {get_rank()}, inference: logits: {logits.shape}, actions_discretes: {actions_discretes.shape}")
+        loss = self.criterion(logits, actions_discretes)
+        # print(f"rank: {get_rank()}, inference: {float(loss.item())}")
+        return loss
+
     
     def cal_loss(self,
                  data,
                  device,
                  ):
-        rgbs, instructions, actions = data
-        if isinstance(rgbs, list):
-            rgbs = [rgb.to(device) if len(rgb.shape) == 4 else rgb.squeeze(0).to(device) for rgb in rgbs]
-        else:
-            rgbs.to(device)
+        rgbs, instructions, actions, split_idx = data
         if len(instructions.shape) == 3:
+            rgbs = rgbs.squeeze(0)
             instructions = instructions.squeeze(0)
             actions = actions.squeeze(0)
+            split_idx = split_idx.squeeze(0)
+        rgbs = rgbs.to(device)
         actions = actions.to(device)
         actions_discretes = self.action_tokenizer.discretize(actions)
         if not isinstance(instructions, list):
             instructions = instructions.to(device)
-        predicts = self.forward(video=rgbs, texts_embeddings=instructions)
+        predicts = self.forward(video=[rgbs, split_idx], texts_embeddings=instructions)
         predicts = predicts.permute(0, 2, 1)
         loss = self.criterion(predicts, actions_discretes)
         return loss

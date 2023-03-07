@@ -20,7 +20,7 @@
 
 import torch
 
-from src.mpu.utils import ensure_divisibility
+from rt_torch.mpu.utils import ensure_divisibility
 
 
 # Intra-layer model parallel group that the current rank belongs to.

@@ -32,10 +32,11 @@ class TextTokenizer():
                  name=None,
                  device=None,
                  ) -> None:
-        if name == 't5':
-            self.text_model = T5Adapter(None, device)
-        else:
-            self.text_model = UniversalSentenceEncoder(name, device)
+        # if name == 't5':
+        #     self.text_model = T5Adapter(None, device)
+        # else:
+        #     self.text_model = UniversalSentenceEncoder(name, device)
+        self.text_model = None
         self.device = device
 
 

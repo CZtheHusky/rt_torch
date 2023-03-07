@@ -146,12 +146,12 @@ def build_language_table_ds(split=0.9, batch_size=16, rgb_list=True, seq_len=6, 
         indices_index[k]["train"] = total_indexes[:train_indice_num]
         indices_index[k]["test"] = total_indexes[train_indice_num:]
 
-    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, rgb_list=rgb_list,seq_len=seq_len)
-    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, rgb_list=rgb_list, seq_len=seq_len)
+    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, rgb_list=rgb_list,seq_len=seq_len, batch_size=batch_size)
+    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, rgb_list=rgb_list, seq_len=seq_len, batch_size=batch_size)
     return train_set, test_set
 
 class language_table_dataset_npz(Dataset):
-    def __init__(self, mode, indices_index, indices, ds_stats, rgb_list=True, seq_len=6) -> None:
+    def __init__(self, mode, indices_index, indices, ds_stats, rgb_list=True, seq_len=6, batch_size=96) -> None:
         super().__init__()
         self.mode = mode
         self.ds_stats = ds_stats
@@ -162,17 +162,13 @@ class language_table_dataset_npz(Dataset):
         self.sub_ds_len = []
         self.ds_list = []
         self.len =0
+        self.batch_size= batch_size
         self.bucket = [0]
         for k, v in self.indices_index.items():
             self.len += len(v[mode])
             self.bucket.append(self.len)
             self.ds_list.append(k)
             self.sub_ds_len.append(len(v[mode]))
-        print(mode)
-        print(f"ds_list: {self.ds_list}")
-        print(f"length: {self.len}")
-        print(f"sub_ds_len: {self.sub_ds_len}")
-        print(f"bucket: {self.bucket}")
             
 
     def return_preprocess(self, rgb, inst, act):
@@ -192,20 +188,20 @@ class language_table_dataset_npz(Dataset):
         assert sub_ds_index >=0 and sub_ds_index <= self.sub_ds_len[idx]
         indice_idx = self.indices_index[ds_name][self.mode][sub_ds_index]
         indice = self.indices[ds_name][indice_idx]
-        indice_detail = f"ds_type: {self.mode}, ds_name: {ds_name}, sub_ds_index: {sub_ds_index}, indice:{indice}\n"
+        # indice_detail = f"ds_type: {self.mode}, ds_name: {ds_name}, sub_ds_index: {sub_ds_index}, indice:{indice}\n"
         ep_start_idx = indice[0]
         ep_end_idx = indice[-1]
         rgbs = []
         acts = []
         insts = []
-        loading_details = ""
+        # loading_details = ""
         for id_idx in range(1, len(indice) - 1):
             # import pdb; pdb.set_trace()
             npz_name = str(indice[id_idx]) + '.npz'
             rgb = np.load(os.path.join(self.ds_stats[ds_name]["path"]["rgb"], npz_name))['arr_0']
             act = np.load(os.path.join(self.ds_stats[ds_name]["path"]["action"], npz_name))['arr_0']
             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
-            loading_details += f"loading {npz_name}, rgb: {len(rgb)}, inst: {len(inst)}, act: {len(act)}\n"
+            # loading_details += f"loading {npz_name}, rgb: {len(rgb)}, inst: {len(inst)}, act: {len(act)}\n"
             rgb, inst, act = self.return_preprocess(rgb, inst, act)   
             rgbs.append(rgb)
             acts.append(act)
@@ -218,13 +214,13 @@ class language_table_dataset_npz(Dataset):
         else:
             insts = torch.cat(insts)
         # import pdb; pdb.set_trace()
-        padding_detail = "padding: "
+        # padding_detail = "padding: "
         if ep_start_idx < self.seq_len - 1:
             rgbs[0] = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 3, 300, 300), rgbs[0]])
             insts = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 768), insts])
-            padding_detail += f"length {self.seq_len - ep_start_idx}\n"
+            # padding_detail += f"length {self.seq_len - ep_start_idx}\n"
         else:
-            padding_detail += f"None\n"
+            # padding_detail += f"None\n"
             rgbs[0] = rgbs[0][ep_start_idx - self.seq_len + 1:]
             insts = insts[ep_start_idx - self.seq_len + 1:]
         acts = acts[ep_start_idx:]
@@ -232,15 +228,19 @@ class language_table_dataset_npz(Dataset):
             rgbs[-1] = rgbs[-1][:ep_end_idx]
             acts = acts[:ep_end_idx]
             insts = insts[:ep_end_idx]
-        total = 0
-        for rgb in rgbs:
-            total += len(rgb)
-        post_process_detail = f"post processed, rgb: {total}, inst: {len(inst)}, act: {len(act)}\n"
-        # print(indice_detail + loading_details + padding_detail + post_process_detail)
-        if total != len(insts) or total != len(acts) + 5:
-            print(indice_detail + loading_details + padding_detail + post_process_detail)
+        # total = 0
+        # for rgb in rgbs:
+        #     total += len(rgb)
+        # post_process_detail = f"post processed, rgb: {total}, inst: {len(inst)}, act: {len(act)}\n"
+        # # print(indice_detail + loading_details + padding_detail + post_process_detail)
+        # if total != len(insts) or total != len(acts) + 5:
+        #     print(indice_detail + loading_details + padding_detail + post_process_detail)
             # import pdb; pdb.set_trace()
-        return rgbs, insts, acts
+        split_idx = torch.ones(self.batch_size) * -1
+        for idx, vid in enumerate(rgbs):
+            split_idx[idx] = len(vid)
+        rgbs = torch.cat(rgbs)
+        return rgbs, insts, acts, split_idx
             
         
     def __getitem__(self, index):

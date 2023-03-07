@@ -1,0 +1,27 @@
+{
+    "train_batch_size" : 3040,
+    "train_micro_batch_size_per_gpu": 190,
+    "gradient_accumulation_steps": 4,
+    "steps_per_print": 1000,
+    
+    "fp16": {
+        "enabled": true,
+        "initial_scale_power": 12
+    },
+
+
+    "tensorboard": {
+        "enabled": false,
+        "job_name": "train_all"
+    },
+
+    "wall_clock_breakdown" : false,
+     "activation_checkpointing": {
+        "partition_activations": false,
+        "cpu_checkpointing": false,
+        "contiguous_memory_optimization": true,
+        "number_checkpoints": 10,
+        "synchronize_checkpoint_boundary": false,
+        "profile": false
+    }
+}

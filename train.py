@@ -25,6 +25,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from warmup_scheduler_pytorch import WarmUpScheduler
 import tensorflow as tf
 from itertools import islice
+from rt_torch.utilizes.optimizer_param_scheduler import OptimizerParamScheduler
 
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1."
 
@@ -54,6 +55,8 @@ parser.add_argument('--token_learner_num', default=8, type=int)
 parser.add_argument('--seq_len', default=6, type=int)
 parser.add_argument('--scheduler_t', default=5, type=int)
 parser.add_argument('--lr', default=1e-5, type=float)
+parser.add_argument('--lr_t', default=1e-5, type=float)
+parser.add_argument('--lr_eff', default=1e-5, type=float)
 parser.add_argument('--lr_min', default=1e-5, type=float)
 parser.add_argument('--load_path', default=None, type=str, help="checkpoint path to load")
 parser.add_argument('--load_args', action='store_true', help="load the args")
@@ -168,6 +171,7 @@ def main(args):
     warmup = args.warmup
     logger, writer, save_path, log_path, handler = log_init(args)
     scheduler = args.scheduler
+    scheduler_t = args.scheduler_t
     depth = args.depth
     heads = args.heads
     key_dim = args.key_dim
@@ -203,7 +207,7 @@ def main(args):
     model.to(device)
     optimizer = get_optimizer(args, model)
     if scheduler == "cosine":
-        lr_scheduler = CosineAnnealingLR(optimizer, T_max=5, eta_min=lr_min)
+        lr_scheduler = CosineAnnealingLR(optimizer, T_max=num_epoch * len(train_loader), eta_min=lr_min)
 
     if warmup:
         warmup_scheduler = WarmUpScheduler(optimizer, lr_scheduler,
@@ -224,8 +228,6 @@ def main(args):
         optimizer.load_state_dict(state_dict['optimizer_state_dict'])
         if scheduler is not None:
             lr_scheduler.load_state_dict(state_dict['scheduler'])
-        for v, weight in zip(train_loader.ds_stats.values(), train_loader.weight):
-            v["current_idx"] = int(loss_step * weight)
     else:
         loss_step = 0
         epoch_s = 0
@@ -248,10 +250,11 @@ def main(args):
 
     for epoch in range(epoch_s, num_epoch):
         model.train()
-        num = len(train_loader) - (loss_step % len(train_loader))
-        pbar = tqdm(range(num))
+        # num = len(train_loader) - (loss_step % len(train_loader))
+        # pbar = tqdm(range(num))
         # time0 = time.time()
-        for data in islice(train_loader, loss_step % len(train_loader), len(train_loader)):
+        # for data in islice(train_loader, loss_step % len(train_loader), len(train_loader)):
+        for data in tqdm(train_loader):
             # time1 = time.time()
             # avg_time["data_prep"] += (time1 - time0)
 
@@ -277,7 +280,8 @@ def main(args):
             # print(loss_step)
             if loss_step % 100 == 0:
                 mean_loss = np.mean(list(train_loss))
-                writer.add_scalar('Learning Rate', float(optimizer.param_groups[0]['lr']), loss_step)
+                if scheduler is not None:
+                    writer.add_scalar('Learning Rate', float(lr_scheduler.get_last_lr()[0]), loss_step)
                 writer.add_scalar('Train_Loss', float(mean_loss), loss_step)
                 logger.info(f"EP: {epoch}, Loss step: {loss_step}, Loss: {mean_loss:.5f}")
 
@@ -295,17 +299,92 @@ def main(args):
                 model.test(test_loader, device, logger, writer, epoch, loss_step)
                 model.train()
 
-            pbar.update(1)
+            # pbar.update(1)
         writer.flush()
     writer.close()
     logger.removeHandler(handler)
     logging.shutdown()
 
+
+def get_optimizer_param_scheduler(args, optimizer):
+    """Build the learning rate scheduler."""
+
+    # Iteration-based training.
+    if args.lr_decay_iters is None:
+        args.lr_decay_iters = args.train_iters
+    lr_decay_steps = args.lr_decay_iters * args.global_batch_size
+    wd_incr_steps = args.train_iters * args.global_batch_size
+    if args.lr_warmup_fraction is not None:
+        lr_warmup_steps = args.lr_warmup_fraction * lr_decay_steps
+    else:
+        lr_warmup_steps = args.lr_warmup_iters * args.global_batch_size
+
+    opt_param_scheduler = OptimizerParamScheduler(
+        optimizer,
+        max_lr=args.lr,
+        min_lr=args.min_lr,
+        lr_warmup_steps=lr_warmup_steps,
+        lr_decay_steps=lr_decay_steps,
+        lr_decay_style=args.lr_decay_style,
+        start_wd=args.start_weight_decay,
+        end_wd=args.end_weight_decay,
+        wd_incr_steps=wd_incr_steps,
+        wd_incr_style=args.weight_decay_incr_style,
+        use_checkpoint_opt_param_scheduler=args.use_checkpoint_opt_param_scheduler,
+        override_opt_param_scheduler=args.override_opt_param_scheduler,
+    )
+
+    return opt_param_scheduler
+
+
+def get_paramaters(args, model: nn.Module):
+    lr_t = args.lr_t
+    lr_efficientnet = args.lr_eff
+    pretrained = set()
+    unpretrained = set()
+    for module_name, module in model.named_modules():
+        for parameter_name, paramater in module.named_parameters():
+            full_parameter_name = "%s.%s" % (module_name, parameter_name) if module_name else parameter_name  # full param name
+            if full_parameter_name.endswith("bias") or full_parameter_name.endswith("weight"):
+                if "film_efficient_net" in full_parameter_name:
+                    if "conditioning_layers" in full_parameter_name:
+                        unpretrained.add(full_parameter_name)
+                    else:
+                        pretrained.add(full_parameter_name)
+                else:
+                    unpretrained.add(full_parameter_name)
+            else:
+                import pdb; pdb.set_trace()
+    param_dict = {parameter_name: paramater for parameter_name, paramater in model.named_parameters()}
+    pretrained = param_dict.keys() & pretrained
+    unpretrained = param_dict.keys() & unpretrained
+    inter_params = pretrained & unpretrained
+    union_params = pretrained | unpretrained
+    assert (
+        len(inter_params) == 0
+    ), "parameters %s made it into both pretrained/unpretrained sets!" % (str(inter_params),)
+    assert len(param_dict.keys() ^ union_params) == 0, (
+        "parameters %s were not separated into either pretrained/unpretrained set!"
+        % (str(param_dict.keys() - union_params),)
+    )
+    optim_groups = [
+        {
+            "params": [
+                param_dict[pn] for pn in sorted(list(pretrained)) if pn in param_dict
+            ],
+            "lr": lr_efficientnet,
+        },
+        {"params": [param_dict[pn] for pn in sorted(list(unpretrained))], "lr": lr_t,},
+    ]
+    return optim_groups
+        
+
 def get_optimizer(args, model):
     # Base optimizer.
+    paramaters = get_paramaters(args, model)
     if args.optimizer == "adam":
         optimizer = Adam(
-            model.parameters(),
+            paramaters,
             lr=args.lr,
             weight_decay=args.weight_decay,
             betas=(args.adam_beta1, args.adam_beta2),
@@ -313,14 +392,14 @@ def get_optimizer(args, model):
         )
     elif args.optimizer == "adamw":
         optimizer = AdamW(
-            model.parameters(),
+            paramaters,
             lr=args.lr,
             betas=(args.adam_beta1, args.adam_beta2),
             eps=args.adam_eps,
         )
     elif args.optimizer == "sgd":
         optimizer = SGD(
-            model.parameters(),
+            paramaters,
             lr=args.lr,
             weight_decay=args.weight_decay,
             momentum=args.sgd_momentum,
