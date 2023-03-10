@@ -35,7 +35,7 @@ from rt_torch.utilizes.training_functions import get_batch
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', default="cuda", type=str)
-parser.add_argument('--device_idx', default="7", type=str)
+parser.add_argument('--device_idx', default="0", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
 parser.add_argument('--batch_size', default=96, type=int, help='batch size')
 parser.add_argument('--loader_bs', default=1, type=int, help='')
