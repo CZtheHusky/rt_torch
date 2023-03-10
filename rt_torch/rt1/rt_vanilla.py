@@ -30,7 +30,7 @@ class RT1_transformer(nn.Module):
             return_last=True,
     ):
         super().__init__()
-        self.action_tokenizer = ActionTokenizer
+        self.action_tokenizer = ActionTokenizer()
         self.image_tokenizer = ImageTokenizer(use_token_leraner=token_learner, 
                                               num_tokens=learned_token_num, 
                                               dropout_rate=token_learner_dropout)
@@ -78,8 +78,9 @@ class RT1_transformer(nn.Module):
             data,
     ):
         frames, texts_embeddings, actions, split_idx = data
-        rgb_size, embedding_size, action_size, split_idx_size = frames.shape, texts_embeddings.shape, actions.shape, split_idx.shape
+        # rgb_size, embedding_size, action_size, split_idx_size = frames.shape, texts_embeddings.shape, actions.shape, split_idx.shape
         # print(f"rank: {get_rank()}, inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
+        # print(f"inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
         device = frames.device
         # import pdb; pdb.set_trace()
         frames = torch.cat([frames, torch.zeros([self.seq_len - 1, *frames.shape[1:]], dtype=frames.dtype).to(device)])
@@ -112,59 +113,35 @@ class RT1_transformer(nn.Module):
         # print(f"rank: {get_rank()}, inference: {float(loss.item())}")
         return loss
 
-    
-    def cal_loss(self,
-                 data,
-                 device,
-                 ):
-        rgbs, instructions, actions, split_idx = data
-        if len(instructions.shape) == 3:
-            rgbs = rgbs.squeeze(0)
-            instructions = instructions.squeeze(0)
-            actions = actions.squeeze(0)
-            split_idx = split_idx.squeeze(0)
-        rgbs = rgbs.to(device)
-        actions = actions.to(device)
-        actions_discretes = self.action_tokenizer.discretize(actions)
-        if not isinstance(instructions, list):
-            instructions = instructions.to(device)
-        predicts = self.forward(video=[rgbs, split_idx], texts_embeddings=instructions)
-        predicts = predicts.permute(0, 2, 1)
-        loss = self.criterion(predicts, actions_discretes)
-        return loss
+    def inference(self, rgb, instruction, inst_buffer, device):
+        # print(f"rgb: {rgb.shape}")
+        # print(f"inst_buffer: {inst_buffer.shape}")
+        texts_embeddings = self.text_tokenizer.embed_texts(instruction, device=device)
+        texts_embeddings = texts_embeddings.to(inst_buffer.dtype)
+        # print(f"texts_embeddings: {texts_embeddings.shape}")
+        # print(f"inst_buffer {inst_buffer.device}, texts_embeddings {texts_embeddings.device}")
+        all_embeddings = torch.cat([inst_buffer, texts_embeddings])
+        image_tokens = self.image_tokenizer(rgb, all_embeddings)
+        # print(f"image_tokens before: {image_tokens.shape}")
+        image_tokens = rearrange(image_tokens, 'f n c -> (f n) c')
+        image_tokens = image_tokens.view(1, *image_tokens.shape)
+        # print(f"image_tokens after: {image_tokens.shape}")
+        attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
+        # print(f"attn_mask: {attn_mask.shape}")
+        logits = self.transformer(image_tokens, attention_mask=attn_mask)
+        # print(f"logits: {logits.shape}")
+        action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
+        # print(f"action last: {action.shape}")
+        out = action.detach().cpu().numpy()
+        # print(f"action: {out}")
+        return out, texts_embeddings
 
-    def test(self,
-             test_set,
-             device,
-             logger,
-             writer,
-             epoch,
-             loss_step,
-             test_size=1000,
-             ):
-        test_loss = 0
-        num_step = 0
-        with torch.no_grad():
-            # import pdb; pdb.set_trace()
-            test_idx = np.random.randint(len(test_set), size=test_size)
-            for idx in test_idx:
-                data = test_set.__getitem__(idx)
-                loss = self.cal_loss(data, device)
-                num_step += 1
-                test_loss += loss
-        test_loss /= num_step
-        logger.info(f"EP: {epoch}, Loss step: {loss_step}, Test_Loss: {test_loss:.5f}")
-        writer.add_scalar('Test_Loss', float(test_loss), loss_step)
-
-    def save_check_point(self, epoch, loss_step, optimizer, save_path, logger, max_save_num, lr_scheduler=None):
-        epoch_str = str(epoch)
-        epoch_str = epoch_str.zfill(4)
-        file_name = str(loss_step)
-        file_name = epoch_str + "_" + file_name.zfill(10)
+    def save_check_point(self, iteration, optimizer, save_path, logger, max_save_num, lr_scheduler=None):
+        file_name = str(iteration)
+        file_name = file_name.zfill(10)
         dict2save = {
             "model_state_dict": self.state_dict(),
-            "epoch": epoch,
-            "loss_step": loss_step,
+            "iteration": iteration,
             "optimizer_state_dict": optimizer.state_dict(),
         }
         if lr_scheduler is not None:

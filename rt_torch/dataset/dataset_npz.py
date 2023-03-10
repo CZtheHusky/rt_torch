@@ -68,7 +68,7 @@ dataset_paths = {
 sub_datas = ["mix"] + list(dataset_paths.keys())
 
 
-def build_language_table_ds(split=0.9, batch_size=16, rgb_list=True, seq_len=6, seed=100):
+def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100):
     if seed:
         np.random.seed(seed)
     ds_stats = {}
@@ -146,18 +146,17 @@ def build_language_table_ds(split=0.9, batch_size=16, rgb_list=True, seq_len=6, 
         indices_index[k]["train"] = total_indexes[:train_indice_num]
         indices_index[k]["test"] = total_indexes[train_indice_num:]
 
-    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, rgb_list=rgb_list,seq_len=seq_len, batch_size=batch_size)
-    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, rgb_list=rgb_list, seq_len=seq_len, batch_size=batch_size)
+    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size)
+    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size)
     return train_set, test_set
 
 class language_table_dataset_npz(Dataset):
-    def __init__(self, mode, indices_index, indices, ds_stats, rgb_list=True, seq_len=6, batch_size=96) -> None:
+    def __init__(self, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96) -> None:
         super().__init__()
         self.mode = mode
         self.ds_stats = ds_stats
         self.indices_index = indices_index
         self.indices = indices
-        self.rgb_list = rgb_list
         self.seq_len = seq_len
         self.sub_ds_len = []
         self.ds_list = []

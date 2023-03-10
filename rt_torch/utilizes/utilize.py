@@ -2,6 +2,7 @@ from einops import pack, unpack
 import cv2
 import numpy as np
 import torch
+import random
 # helpers
 
 def exists(val):
@@ -55,3 +56,28 @@ def print_with_rank(message):
         print(f"rank: {rank}", message, flush=True)
     else:
         print(message, flush=True)
+
+def setup_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # tf.random.set_seed(seed)
+
+def getModelSize(model, logger):
+    param_size = 0
+    param_sum = 0
+    for param in model.parameters():
+        param_size += param.nelement() * param.element_size()
+        param_sum += param.nelement()
+    buffer_size = 0
+    buffer_sum = 0
+    for buffer in model.buffers():
+        buffer_size += buffer.nelement() * buffer.element_size()
+        buffer_sum += buffer.nelement()
+    all_size = (param_size + buffer_size) / 1024 / 1024
+    logger.info('Model size: {:.3f}MB'.format(all_size))
+    logger.info('Parameter size: {:.3f}MB'.format(param_size / 1024 / 1024))
+    logger.info('Parameter num: {:.3f} m'.format(param_sum / 1024 / 1024))
+    logger.info('Buffer size: {:.3f}MB'.format(buffer_size / 1024 /1024))
+    return (param_size, param_sum, buffer_size, buffer_sum, all_size)

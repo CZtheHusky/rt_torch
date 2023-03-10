@@ -32,16 +32,17 @@ class TextTokenizer():
                  name=None,
                  device=None,
                  ) -> None:
-        # if name == 't5':
-        #     self.text_model = T5Adapter(None, device)
-        # else:
-        #     self.text_model = UniversalSentenceEncoder(name, device)
-        self.text_model = None
+        if name == 't5':
+            self.text_model = T5Adapter(None, device)
+        else:
+            self.text_model = UniversalSentenceEncoder(name, device)
+        # self.text_model = None
         self.device = device
 
 
-    def embed_texts(self, texts: List[str]):
-        device = self.device
+    def embed_texts(self, texts: List[str], device):
+        # device = self.device
+        # print(f"embedding {device}")
         text_embeds = []
         text_embed = self.text_model.embed_text(texts)
         text_embeds.append(text_embed.to(device))

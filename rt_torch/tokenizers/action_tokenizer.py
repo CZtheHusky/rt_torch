@@ -35,7 +35,7 @@ class ActionTokenizer:
 
     def discrete2Scalar(self, x):
         action = x.argmax(-1)
-        if action.max() >= self.num_continuous_bin or action.min() < 0:
+        if action.max() >= self.num_action_bin or action.min() < 0:
             print(
                 "Warning of exceeded range of discrete number to recontruct, "
                 "by default values will be cliped, min: {}, max:{}".format(
@@ -44,7 +44,7 @@ class ActionTokenizer:
             )
             import pdb
             pdb.set_trace()
-            action = torch.clip(action, 0, self.num_continuous_bin - 1)
+            action = torch.clip(action, 0, self.num_action_bin - 1)
 
-        action = ((action.float() / self.num_continuous_bin) * 2 - 1) / 10
+        action = ((action.float() / self.num_action_bin) * 2 - 1) / 10
         return action

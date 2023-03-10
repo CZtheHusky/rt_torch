@@ -11,3 +11,4 @@
 # python /home/cz/bs/rt_torch/train.py --alias LT-RT1  --device_idx 7 --lr 1e-5 --optimizer adam --batch_size 96
 # python /home/cz/bs/rt_torch/train.py --alias NO-STACK  --device_idx 6 --lr 1e-5 --optimizer adam --batch_size 16
 # python /home/cz/bs/rt_torch/train.py --lr 1e-3 --lr_min 1e-4 --device_idx 3 --optimizer adam --batch_size 96 --loader_shuffle --scheduler cosine  --alias LR-RT1-COSINE
+# python /home/cz/bs/rt_torch/train.py --alias LT-RT1-debug  --device_idx 7 --lr 1e-5 --optimizer adam --batch_size 96 --test_interval 1 --save_interval 1
