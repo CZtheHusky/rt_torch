@@ -1,10 +1,8 @@
-from typing import Optional, Callable, Tuple
 import torch
-from torch import nn
-from rt_torch.utilizes.utilize import *
 from einops import rearrange, einsum
-from einops.layers.torch import Rearrange, Reduce
-from rt_torch.film_efficient.film_conditioning import FiLM
+from einops.layers.torch import Rearrange
+from torch import nn
+
 from rt_torch.utilizes.utilize import *
 
 
@@ -13,12 +11,12 @@ class ConditionalAttention(nn.Module):
             self,
             feed_forward_size: int,
             key_dim: int,
-            value_dim: int=None,
-            output_dim: int=None,
-            heads: int=8,
-            dropout_att: float=0.1,
-            conditioning: bool=False,
-            text_embedding_dim=None
+            value_dim: int = None,
+            output_dim: int = None,
+            heads: int = 8,
+            dropout_att: float = 0.1,
+            conditioning: bool = False,
+            text_embedding_dim=None,
     ):
         super().__init__()
         self.heads = heads
@@ -50,7 +48,7 @@ class ConditionalAttention(nn.Module):
             # adaptive layer-norm
             raise NotImplementedError
         # q, k, v: b n inner_dim
-        
+
         value = self.to_v(x)
         query = self.to_q(x)
         key = self.to_k(x)
@@ -64,13 +62,13 @@ class ConditionalAttention(nn.Module):
 
         if exists(attn_mask):
             # import pdb; pdb.set_trace()
-            sim = sim.masked_fill(attn_mask, -torch.finfo(sim.dtype).max)
+            sim = sim.masked_fill(attn_mask, torch.finfo(sim.dtype).min)
 
         attn = sim.softmax(dim=-1)
         attn = self.attn_dropout(attn)
         # attn: b h i j
         # v: b h j d
-        
+
         out = einsum(attn, value, 'b h i j, b h j d -> b h i d')
 
         out = rearrange(out, 'b h n d -> b n (h d)')
@@ -88,37 +86,37 @@ class ConditionalTransformerLayer(nn.Module):
             ff_dropout=0.1,
     ):
         super().__init__()
-        self.attn = ConditionalAttention(feed_forward_size=feed_forward_size, key_dim=key_dim, heads=heads, dropout_att=attn_dropout)
+        self.attn = ConditionalAttention(feed_forward_size=feed_forward_size, key_dim=key_dim, heads=heads,
+                                         dropout_att=attn_dropout)
         self.ffn = nn.Sequential(
+            nn.LayerNorm(feed_forward_size),
             nn.Linear(feed_forward_size, feed_forward_size),
             nn.Dropout(ff_dropout),
         )
-        self.ffn_norm = nn.LayerNorm(feed_forward_size)
 
     def forward(
             self,
             x,
             attn_mask=None
     ):
-
         x = self.attn(x, attn_mask=attn_mask) + x
-        x = self.ffn_norm(x)
         x = self.ffn(x) + x
         return x
-    
+
+
 class TransformerBlocks(nn.Module):
     def __init__(self,
-                num_layers: int = 1,
-                key_dim: int = 4096,
-                num_heads: int = 8,
-                feed_forward_size: int = 512,
-                vocab_size: int = 256,
-                num_actions: int = 2,
-                max_sequence_len: int = 256,
-                input_embedding_size: int = 512,
-                drop_out_rate: float = 0.1,
-                return_last: bool = True,
-                ) -> None:
+                 num_layers: int = 1,
+                 key_dim: int = 4096,
+                 num_heads: int = 8,
+                 feed_forward_size: int = 512,
+                 vocab_size: int = 256,
+                 num_actions: int = 2,
+                 max_sequence_len: int = 48,
+                 input_embedding_size: int = 512,
+                 drop_out_rate: float = 0.1,
+                 return_last: bool = True,
+                 ) -> None:
         super().__init__()
         self.layers = nn.ModuleList([
             ConditionalTransformerLayer(feed_forward_size=feed_forward_size,
@@ -133,7 +131,7 @@ class TransformerBlocks(nn.Module):
         self.output_tokens = nn.Sequential(
             nn.Linear(feed_forward_size, num_actions * vocab_size),
             Rearrange('... (a b) -> ... a b', b=vocab_size),
-            )
+        )
         self.return_last = return_last
 
     def forward(self,
@@ -155,7 +153,14 @@ class TransformerBlocks(nn.Module):
         if self.return_last:
             # import pdb; pdb.set_trace()
             # print(f"x {x.shape}")
-            x = x[:, -1]    # b (t n) d
+            x = x[:, -1]  # b (t n) d
             # print(f"x after {x.shape}")
         return self.output_tokens(x)
 
+if __name__ == "__main__":
+    t_block = TransformerBlocks(num_layers=1, key_dim=512, num_heads=8, feed_forward_size=512, vocab_size=256)
+    attn_mask = torch.ones((48, 48), dtype=torch.bool).triu(1)
+    test_input = torch.randn((5, 48, 512))
+    out = t_block(test_input, attn_mask)
+    print(out.shape)
+    print(out)

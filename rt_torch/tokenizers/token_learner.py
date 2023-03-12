@@ -80,9 +80,7 @@ class TokenLearner(nn.Module):
             self,
             *,
             dim,
-            ff_mult=2,
             num_output_tokens=8,
-            num_layers=2
     ):
         super().__init__()
         inner_dim = int(math.sqrt(dim * num_output_tokens))
@@ -93,7 +91,6 @@ class TokenLearner(nn.Module):
             nn.Linear(dim, inner_dim),
             nn.GELU(),
             nn.Linear(inner_dim, num_output_tokens),
-            
         )
 
     def forward(self, x):
@@ -113,39 +110,74 @@ class TokenLearner(nn.Module):
         # import pdb; pdb.set_trace()
         return res
 
-
-class TokenLearner_(nn.Module):
-    """
-    https://arxiv.org/abs/2106.11297
-    using the 1.1 version with the MLP (2 dense layers with gelu) for generating attention map
-    """
-
-    def __init__(
-            self,
-            *,
-            dim,
-            ff_mult=2,
-            num_output_tokens=8,
-            num_layers=2
-    ):
+class TokenLearnerModule(nn.Module):
+    def __init__(self,
+                 inputs_channels: int,
+                 num_tokens: int,
+                 bottleneck_dim: int = 64,
+                 dropout_rate: float = 0.):
         super().__init__()
-        inner_dim = dim * ff_mult * num_output_tokens
 
-        self.num_output_tokens = num_output_tokens
-        self.net = nn.Sequential(
-            nn.Conv2d(dim * num_output_tokens, inner_dim, 1, groups=num_output_tokens),
-            nn.GELU(),
-            nn.Conv2d(inner_dim, num_output_tokens, 1, groups=num_output_tokens),
-        )
+        self.layerNorm = nn.LayerNorm(inputs_channels)
 
-    def forward(self, x):
-        x, ps = pack_one(x, '* c h w')
-        x = repeat(x, 'b c h w -> b (g c) h w', g=self.num_output_tokens)
-        attn = self.net(x)
+        self.conv1 = nn.Conv2d(in_channels=inputs_channels,
+                               out_channels=bottleneck_dim,
+                               kernel_size=1,
+                               stride=1,
+                               padding=0
+                               )
 
-        attn = rearrange(attn, 'b g h w -> b 1 g h w')
-        x = rearrange(x, 'b (g c) h w -> b c g h w', g=self.num_output_tokens)
+        self.gelu1 = nn.GELU(approximate='tanh')
 
-        x = reduce(x * attn, 'b c g h w -> b c g', 'mean')
-        x = unpack_one(x, ps, '* c n')
-        return x
+        if dropout_rate > 0:
+            self.dropout1 = nn.Dropout2d(dropout_rate)
+        else:
+            self.dropout1 = nn.Identity()
+
+        self.conv2 = nn.Conv2d(in_channels=bottleneck_dim,
+                               out_channels=num_tokens,
+                               kernel_size=1,
+                               stride=1,
+                               padding=0
+                               )
+
+        if dropout_rate > 0:
+            self.dropout2 = nn.Dropout2d(dropout_rate)
+        else:
+            self.dropout2 = nn.Identity()
+
+    # inputs: [bs, c, h, w] or [bs * seq, c, h, w]
+    # seq is time-series length such as frame
+    def forward(self, inputs: torch.Tensor):
+        # layer norm
+        x = self.layerNorm(inputs.permute(0, 2, 3, 1))
+        x = x.permute(0, 3, 1, 2)
+
+        # create weights map
+        x = self.gelu1(self.conv1(x))
+        x = self.dropout1(x)
+        x = self.conv2(x)
+        x = self.dropout2(x)  # (bs, num_tokens, h, w)
+
+        x = x.view(x.shape[0], x.shape[1], -1)  # (bs, num_tokens, h*w)
+        weights_maps = F.softmax(x, dim=-1)
+
+        # create tokens
+        bs, c, h, w = inputs.shape
+        inputs = inputs.permute(0, 2, 3, 1).view(bs, h * w, c)
+
+        tokens = torch.bmm(weights_maps, inputs)
+        # weighs_maps: [bs, n_token, h*w]
+        # inputs: [bs, h * w, c]
+        # tokens: [bs, n_token, c]
+
+        # Above computation is equivalent to below explanation.
+        # weights_maps has n_tokens channels. each channels is a weight map with the size of (h, w).
+        # inputs has c channels, each channels size is (h, w).
+        # compute the element-wise product of one weight map of weights_maps and one of channels of inputs
+        # That result in (H, W). After sum this, we get a scalar.
+        # Iterate this operation to all other channels of inputs using the same weight map, we get c scalar.
+        # reshape (1, 1, c), then we get a learned token, as shown in Fig. 1 in tokenlearner paper.
+        # We do the computation using all other weight map, then we get all tokens.
+        return tokens
+
