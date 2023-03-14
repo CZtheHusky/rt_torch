@@ -14,6 +14,7 @@ from rt_torch.utilizes.eval_env import eval_in_env
 from rt_torch.utilizes.train_configs import *
 from rt_torch.utilizes.training_functions import *
 from rt_torch.utilizes.loggings import log_init
+import json
 
 def main(args):
     batch_size = args.batch_size
@@ -47,6 +48,9 @@ def main(args):
     optimizer = get_optimizer(args, model)
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     log_path = args.log_path
+    os.makedirs(log_path, exist_ok=True)
+    with open(os.path.join(log_path, 'args.json'), 'w') as f:
+        json.dump(args.__dict__, f)
     deepspeed.init_distributed(distributed_port=args.deepspeed_port)
     # mpu.initialize_model_parallel()
     # if mpu.get_data_parallel_rank() == 0:
@@ -87,7 +91,7 @@ def main(args):
     rank = model_engine.global_rank
     # logger, handler = log_init(args, rank)
     # print_with_rank(f"building dataset with seed: {rank}")
-    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size // loader_bs, seq_len=seq_len, seed=args.seed)
+    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size // loader_bs, seq_len=seq_len, seed=args.seed, dumb=False, sub_data="language_table_sim")
     train_loader, test_loader = build_distributed_dataloader(args, train_set, test_set, world_size, rank)
     if rank == 0:
         print(args)
@@ -115,6 +119,13 @@ def main(args):
         pbar = tqdm(range(args.train_iters))
     while iteration < args.train_iters:
         losses = train_step(args, model_engine, train_data_iterator)
+        if rank == 0 and model_engine.monitor.enabled:
+            mean_loss = np.mean(losses)
+            summary_events = [
+                (f'Train/Samples/train_loss-iter', float(mean_loss), iteration), 
+                ]
+            summary_events.append((f"Train/Samples/lr-iter", model_engine.get_lr()[0], iteration))
+            model_engine.monitor.write_events(summary_events)
         args.iteration = iteration
         if args.test_interval and iteration % args.test_interval == 0 or iteration == args.train_iters:
             local_eval_rewards = eval_in_env(args, model_engine, log_path, rank, iteration)
@@ -152,16 +163,11 @@ def main(args):
                     summary_events = [
                         (f'Train/Samples/eval_reward', float(total_reward), model_engine.global_samples), 
                         (f'Train/Samples/test_loss', float(total_loss), model_engine.global_samples), 
+                        (f'Train/Samples/eval_reward-iter', float(total_reward), iteration), 
+                        (f'Train/Samples/test_loss-iter', float(total_loss), iteration), 
                         ]
                     model_engine.monitor.write_events(summary_events)
                 # logger.info(f"Iteration: {model_engine.global_samples}, Test Loss: {total_loss:.5f}")
-                video_path = os.path.join(log_path, "videos")
-                video_dirs = os.listdir(video_path)
-                if len(video_dirs) > 10:
-                    video_dirs = sorted(video_dirs)
-                    num = len(video_dirs) - 10
-                    for i in range(num):
-                        shutil.rmtree(os.path.join(video_path, video_dirs[i]))
         iteration += 1
         if rank == 0:
             # loss = sum(losses) / len(losses)

@@ -1,9 +1,7 @@
 import numpy as np
-import tensorflow_datasets as tfds
 import torch
 from torch.utils.data import Dataset, DataLoader
 from collections import deque
-import tensorflow as tf
 import cv2 as cv
 import time
 import torch.nn.functional as F
@@ -68,11 +66,14 @@ dataset_paths = {
 sub_datas = ["mix"] + list(dataset_paths.keys())
 
 
-def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100):
+def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=False, sub_data="mix"):
     if seed:
         np.random.seed(seed)
     ds_stats = {}
     for idx, (k, v) in enumerate(dataset_paths.items()):
+        if sub_data != "mix":
+            if k != sub_data:
+                continue
         obs_path = v + "/observations"
         act_path = v + "/actions"
         inst_path = obs_path + "/instructions"
@@ -146,12 +147,12 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100):
         indices_index[k]["train"] = total_indexes[:train_indice_num]
         indices_index[k]["test"] = total_indexes[train_indice_num:]
 
-    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size)
-    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size)
+    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb)
+    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb)
     return train_set, test_set
 
 class language_table_dataset_npz(Dataset):
-    def __init__(self, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96) -> None:
+    def __init__(self, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96, dumb=False) -> None:
         super().__init__()
         self.mode = mode
         self.ds_stats = ds_stats
@@ -163,6 +164,8 @@ class language_table_dataset_npz(Dataset):
         self.len =0
         self.batch_size= batch_size
         self.bucket = [0]
+        self.dumb = dumb
+        self.dumb_tmp = None
         for k, v in self.indices_index.items():
             self.len += len(v[mode])
             self.bucket.append(self.len)
@@ -201,6 +204,7 @@ class language_table_dataset_npz(Dataset):
             act = np.load(os.path.join(self.ds_stats[ds_name]["path"]["action"], npz_name))['arr_0']
             inst = np.load(os.path.join(self.ds_stats[ds_name]["path"]["inst_embed"], npz_name))['arr_0']
             # loading_details += f"loading {npz_name}, rgb: {len(rgb)}, inst: {len(inst)}, act: {len(act)}\n"
+            # print(rgb.dtype)
             rgb, inst, act = self.return_preprocess(rgb, inst, act)   
             rgbs.append(rgb)
             acts.append(act)
@@ -243,7 +247,12 @@ class language_table_dataset_npz(Dataset):
             
         
     def __getitem__(self, index):
-        return self.__getindice__(index)
+        if self.dumb:
+            if not self.dumb_tmp:
+                self.dumb_tmp = self.__getindice__(0)
+            return self.dumb_tmp
+        else:
+            return self.__getindice__(index)
      
     def __len__(self):
         return self.len

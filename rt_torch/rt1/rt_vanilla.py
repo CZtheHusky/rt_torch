@@ -104,14 +104,16 @@ class RT1_transformer(nn.Module):
         
         # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
-        # import pdb; pdb.set_trace()
         if not self.return_last:
             logits = logits[:, -1]
-        logits = logits.permute(0, 2, 1)
+        # logits = logits.permute(0, 2, 1)
+        logits = logits.view(-1, logits.shape[-1])
         actions_discretes = self.action_tokenizer.discretize(actions)
+        actions_discretes = actions_discretes.view(-1)
         # print(f"rank: {get_rank()}, inference: logits: {logits.shape}, actions_discretes: {actions_discretes.shape}")
         loss = self.criterion(logits, actions_discretes)
         # print(f"rank: {get_rank()}, inference: {float(loss.item())}")
+        # import pdb; pdb.set_trace()
         return loss
 
     def inference(self, rgb, instruction, inst_buffer, device):

@@ -41,6 +41,7 @@ def get_optimizer_param_scheduler(args, optimizer):
 def get_paramaters(args, model: nn.Module):
     lr_t = args.lr_t
     lr_eff = args.lr_eff
+    assert lr_t == 1 or lr_eff == 1
     if lr_t == lr_eff:
         return model.parameters()
     pretrained = set()
@@ -75,9 +76,9 @@ def get_paramaters(args, model: nn.Module):
             "params": [
                 param_dict[pn] for pn in sorted(list(pretrained)) if pn in param_dict
             ],
-            "lr": lr_eff,
+            "lr": lr_eff * args.lr,
         },
-        {"params": [param_dict[pn] for pn in sorted(list(unpretrained))], "lr": lr_t,},
+        {"params": [param_dict[pn] for pn in sorted(list(unpretrained))], "lr": lr_t * args.lr},
     ]
     return optim_groups
         

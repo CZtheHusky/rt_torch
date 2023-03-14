@@ -64,7 +64,7 @@ def forward_and_backward_step(
         if do_backward:
             model.backward(loss)
             model.step()
-        loss_list.append(loss)
+        loss_list.append(loss.cpu().item())
     return loss_list
 
 def cal_test_loss(
@@ -87,7 +87,7 @@ def cal_test_loss(
                 test_data_iterator,
                 do_backward=False,
             )
-            loss_list = [l.cpu().item() for l in loss_list]
+            # loss_list = [l.cpu().item() for l in loss_list]
             total_loss = total_loss + np.mean(loss_list)
         # XXX: be careful with this when use parallel
         total_loss /= args.test_iters

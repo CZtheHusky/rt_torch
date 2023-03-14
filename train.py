@@ -39,15 +39,15 @@ parser.add_argument('--device_idx', default="0", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
 parser.add_argument('--batch_size', default=96, type=int, help='batch size')
 parser.add_argument('--loader_bs', default=1, type=int, help='')
-parser.add_argument('--loader_shuffle', action='store_true', help="load the args")
+parser.add_argument('--loader_shuffle', default=True, type=bool, help="")
 parser.add_argument('--loader_worker', default=16, type=int, help='')
-parser.add_argument('--train_iters', default=500000, type=int, help='train_iters')
-parser.add_argument('--test_iter', default=500, type=int, help='test_iter')
+parser.add_argument('--train-iters', default=500000, type=int, help='train_iters')
+parser.add_argument('--test-iters', default=500, type=int, help='test_iter')
 parser.add_argument('--iteration', default=0, type=int, help='iteration')
 parser.add_argument('--norm_clip', default=40, type=int, help='clip norm')
-parser.add_argument('--test_interval', default=10000, type=int, help='test_interval')
+parser.add_argument('--test-interval', default=10000, type=int, help='test_interval')
 parser.add_argument('--seed', default=100, type=int, help='')
-parser.add_argument('--save_interval', default=10000, type=int)
+parser.add_argument('--save-interval', default=10000, type=int)
 parser.add_argument('--alias', default="", type=str, help="alias of the experiment")
 parser.add_argument('--sub_data', default="mix", type=str, help="data for training")
 parser.add_argument('--max_save_num', default=5, type=int)
@@ -61,14 +61,14 @@ parser.add_argument('--token_learner_num', default=8, type=int)
 parser.add_argument('--seq_len', default=6, type=int)
 parser.add_argument('--scheduler_t', default=5, type=int)
 parser.add_argument('--lr', default=1e-5, type=float)
-parser.add_argument('--lr_t', default=1e-5, type=float)
-parser.add_argument('--lr_eff', default=1e-5, type=float)
-parser.add_argument('--lr_min', default=1e-5, type=float)
+parser.add_argument('--lr_t', default=1, type=float)
+parser.add_argument('--lr_eff', default=1, type=float)
+parser.add_argument('--min_lr', default=1e-5, type=float)
 parser.add_argument('--load_path', default=None, type=str, help="checkpoint path to load")
 parser.add_argument('--load_args', action='store_true', help="load the args")
 parser.add_argument('--fp16', action='store_true', help="")
-parser.add_argument('--eval_eps', default=10, type=int)
-parser.add_argument('--eval_timeout', default=100, type=int)
+parser.add_argument('--eval-eps', default=10, type=int)
+parser.add_argument('--eval-timeout', default=100, type=int)
 parser.add_argument('--optimizer', default="adam", type=str, help="type of the optimizer")
 parser.add_argument('--scheduler', default=None, type=str, help="")
 parser.add_argument('--warmup', action='store_true', help="using warmup scheduler")
@@ -100,9 +100,11 @@ def log_init(args=None):
     history = "/home/cz/bs/rt_torch/history"
     # log_name = time.strftime("%Y%m%d-%H%M%S", time.localtime()) + '/'
     if args.load_path is not None:
-        log_name = os.path.basename(args.load_path) + "_" + time.strftime("%m%d-%H%M",time.localtime())
+        log_name = os.path.basename(args.load_path) + "-" + time.strftime("%m%d-%H%M%S",time.localtime())
     else:
-        log_name = time.strftime("%m%d-%H%M",time.localtime()) + "_" + args.text_encoder + "_" + str(args.lr) + "_" + args.alias
+        time_str = time.strftime("%m%d-%H%M%S",time.localtime()) + "-"
+        log_name = f"{args.text_encoder}-{args.lr}-{args.lr_t}-{args.lr_eff}-{args.depth}-{args.key_dim}-{args.alias}"
+        log_name = time_str + log_name
     log_path = os.path.join(history, log_name)
     models_path = os.path.join(log_path, 'models')
     print(history)
@@ -171,7 +173,7 @@ def main(args):
     norm_clip = args.norm_clip
     test_interval = args.test_interval
     seed = args.seed
-    lr_min = args.lr_min
+    lr_min = args.min_lr
     save_interval = args.save_interval
     max_save_num = args.max_save_num
     sub_data = args.sub_data
@@ -195,7 +197,7 @@ def main(args):
 
     print('device: ', device)
     
-    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size, seq_len=seq_len, seed=seed)
+    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size, seq_len=seq_len, seed=seed, dumb=False, sub_data="language_table_sim")
     train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
     test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
     model = RT1_transformer(
@@ -272,7 +274,8 @@ def main(args):
         if test_interval != 0 and iteration % test_interval == 0:
             model.eval()
             eval_rewards = eval_in_env(args, model, log_path, 0, iteration)
-            writer.add_scalar('Train/Samples/eval_reward', float(eval_rewards), iteration)
+            writer.add_scalar('Train/Samples/eval_reward', float(eval_rewards), iteration * batch_size)
+            writer.add_scalar('Train/Samples/eval_reward-iter', float(eval_rewards), iteration)
             logger.info(f"Iteration: {iteration}, eval_reward: {eval_rewards:.5f}")
             test(args, model, test_data_iterator, logger, writer, iteration)
             model.train()
@@ -298,8 +301,10 @@ def main(args):
         # print(loss_step)
         # mean_loss = np.mean(list(train_loss))
         if scheduler is not None:
-            writer.add_scalar('Train/Samples/lr', float(lr_scheduler.get_last_lr()[0]), iteration)
-        writer.add_scalar('Train/Samples/train_loss', float(train_loss), iteration)
+            writer.add_scalar('Train/Samples/lr', float(lr_scheduler.get_last_lr()[0]), iteration * batch_size)
+            writer.add_scalar('Train/Samples/lr-iter', float(lr_scheduler.get_last_lr()[0]), iteration)
+        writer.add_scalar('Train/Samples/train_loss', float(train_loss), iteration * batch_size)
+        writer.add_scalar('Train/Samples/train_loss-iter', float(train_loss), iteration)
         logger.info(f"Iteration: {iteration}, Loss: {train_loss:.5f}")
 
             # for key, value in avg_time.items():
@@ -320,14 +325,15 @@ def test(args, model, test_data_iterator, logger, writer, iteration):
     test_loss = 0
     num_step = 0
     with torch.no_grad():
-        while num_step < args.test_iter:
+        while num_step < args.test_iters:
             data = get_batch(args, test_data_iterator)
             loss = model.forward(data)
             num_step += 1
             test_loss += loss
-    test_loss /= args.test_iter
-    logger.info(f"Iteration: {iteration}, Test_Loss: {test_loss:.5f}")
-    writer.add_scalar('Train/Samples/lr/test_loss', float(test_loss), iteration)
+    test_loss /= args.test_iters
+    logger.info(f"Iteration: {iteration * args.batch_size}, Test_Loss: {test_loss:.5f}")
+    writer.add_scalar('Train/Samples/test_loss', float(test_loss), iteration * args.batch_size)
+    writer.add_scalar('Train/Samples/test_loss-iter', float(test_loss), iteration)
 
 if __name__ == "__main__":
     args = parser.parse_args()
