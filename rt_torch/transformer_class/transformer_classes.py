@@ -1,4 +1,3 @@
-import torch
 from einops import rearrange, einsum
 from einops.layers.torch import Rearrange
 from torch import nn
@@ -156,21 +155,116 @@ class TransformerBlocks(nn.Module):
             x = x[:, -1]  # b (t n) d
             # print(f"x after {x.shape}")
         return self.output_tokens(x)
-    
-class CrossAttention(nn.Module):
-    def __init__(self,
-                 query_dim,
-                 key_dim,
-                 value_dim,
-                 ) -> None:
+
+
+class FusionTransformerBlocks(nn.Module):
+    def __init__(
+            self,
+            nhead=8,
+            dropout=0.1,
+            d_model=512,
+            dim_feedforward=None,
+            batch_first=True,
+    ):
         super().__init__()
-        
+        if dim_feedforward is None:
+            dim_feedforward = d_model
+        self.query_norm = nn.LayerNorm(d_model)
+        self.key_norm = nn.LayerNorm(d_model)
+        self.attention = nn.MultiheadAttention(embed_dim=d_model, num_heads=nhead, dropout=dropout, batch_first=batch_first)
+        self.ffn_dropout = nn.Dropout(dropout)
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, dim_feedforward),
+            nn.GELU(),
+            nn.Linear(dim_feedforward, d_model),
+        )
+
+    def forward(self, query, key, attn_mask=None):
+        residual_query = query
+        query = self.qeury_norm(query)
+        key = self.key_norm(key)
+        x, _ = self.attention(query, key, key, attn_mask=attn_mask)
+        x = x + residual_query
+        x = self.ffn_dropout(x) + x
+        return x
+
+
 
 
 class LanguageVisionFusion(nn.Module):
-    def __init__(self) -> None:
+    def __init__(
+            self,
+            nhead=8,
+            dropout=0.1,
+            d_model=512,
+            n_layer=2,
+            dim_feedforward=2048,
+    ) -> None:
         super().__init__()
-        
+        self.transformer_blocks = nn.ModuleList(
+            [FusionTransformerBlocks(d_model=d_model,
+                                     nhead=nhead,
+                                     dim_feedforward=dim_feedforward,
+                                     dropout=dropout,
+                                     batch_first=True,
+                                     )
+             for _ in range(n_layer)]
+        )
+
+    def forward(self, lan_emb, vis_emb, attn_mask=None):
+        for layer in self.transformer_blocks:
+            lan_emb = layer(lan_emb, vis_emb, attn_mask=attn_mask)
+        return lan_emb
+
+
+
+def positional_encoding(x, d_model):
+    """Adds positional encoding to a tensor.
+
+    Args:
+      x: Tensor with shape [batch_size, seq_length, d_model]
+      d_model: Model dimensionality.
+
+    Returns:
+      Tensor with the same shape as x.
+    """
+    batch_size, seq_length = x.size(0), x.size(1)
+    pos = torch.arange(seq_length, dtype=torch.float32).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-torch.log(10000.0) / d_model))
+    pos_embedding = torch.zeros((seq_length, d_model))
+    pos_embedding[:, 0::2] = torch.sin(pos * div_term)
+    pos_embedding[:, 1::2] = torch.cos(pos * div_term)
+    pos_embedding = pos_embedding.unsqueeze(0).repeat(batch_size, 1, 1)
+    x = x + pos_embedding.to(x.device)
+    return x
+
+def positional_encoding_2d(x, d_model):
+    """Adds positional encoding to a 2D tensor.
+
+    Args:
+      x: Tensor with shape [batch_size, height, width, d_model]
+      d_model: Model dimensionality.
+
+    Returns:
+      Tensor with the same shape as x.
+    """
+    batch_size, height, width = x.size(0), x.size(1), x.size(2)
+    pos_x = torch.arange(height, dtype=torch.float32).unsqueeze(1).repeat(1, width)
+    pos_y = torch.arange(width, dtype=torch.float32).unsqueeze(0).repeat(height, 1)
+    div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-torch.log(10000.0) / d_model))
+    pos_x_embedding = torch.zeros((height, d_model))
+    pos_x_embedding[:, 0::2] = torch.sin(pos_x * div_term)
+    pos_x_embedding[:, 1::2] = torch.cos(pos_x * div_term)
+    pos_y_embedding = torch.zeros((width, d_model))
+    pos_y_embedding[:, 0::2] = torch.sin(pos_y * div_term)
+    pos_y_embedding[:, 1::2] = torch.cos(pos_y * div_term)
+    pos_x_embedding = pos_x_embedding.unsqueeze(1).repeat(1, width, 1)
+    pos_y_embedding = pos_y_embedding.unsqueeze(0).repeat(height, 1, 1)
+    pos_embedding = torch.cat([pos_x_embedding, pos_y_embedding], dim=2).unsqueeze(0).repeat(batch_size, 1, 1, 1)
+    x = x + pos_embedding.to(x.device)
+    return x
+
 
 if __name__ == "__main__":
     t_block = TransformerBlocks(num_layers=1, key_dim=512, num_heads=8, feed_forward_size=512, vocab_size=256)

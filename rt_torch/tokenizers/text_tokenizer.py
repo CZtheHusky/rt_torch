@@ -34,9 +34,12 @@ class TextTokenizer():
                  ) -> None:
         if name == 't5':
             self.text_model = T5Adapter(None, device)
+            self.text_embed_dim = 768
         else:
             self.text_model = UniversalSentenceEncoder(name, device)
+            self.text_embed_dim = 512
         # self.text_model = None
+
         self.device = device
 
 

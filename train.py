@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.models import EfficientNet_B3_Weights
 from tqdm import tqdm
 from rt_torch.rt1.rt_vanilla import RT1_transformer
-# from rt_torch.rt1.rt_xl import RT1_transformerxl
+# from rt_torch.rt1.rt_fusion import RT1_fusion
 from rt_torch.dataset.dataset_npz import build_language_table_ds
 from rt_torch.tokenizers.action_tokenizer import ActionTokenizer
 from collections import defaultdict
@@ -22,7 +22,7 @@ import time
 from collections import deque
 from torch.optim import Adam, SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from warmup_scheduler_pytorch import WarmUpScheduler
+# from warmup_scheduler_pytorch import WarmUpScheduler
 import tensorflow as tf
 from itertools import islice
 from rt_torch.utilizes.optimizer_param_scheduler import OptimizerParamScheduler
@@ -77,6 +77,7 @@ parser.add_argument('--adam_beta2', default=0.99, type=float, help="")
 parser.add_argument('--adam_eps', default=1e-8, type=float, help="")
 parser.add_argument('--weight_decay', default=0, type=float, help="")
 parser.add_argument('--sgd_momentum', default=0, type=float, help="")
+parser.add_argument('--model', default="vanilla", type=float, help="")
 
 
 
@@ -200,22 +201,44 @@ def main(args):
     train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size, seq_len=seq_len, seed=seed, dumb=False, sub_data="language_table_sim")
     train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
     test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
-    model = RT1_transformer(
-            num_actions=num_actions,
-            vocab_size=vocab_size,
-            num_layers=depth,
-            heads=heads,
-            key_dim=key_dim,
-            feed_forward_size=model_dim,
-            text_encoder=text_encoder,
-            seq_len=seq_len,
+    if args.model == "vanilla":
+        model = RT1_transformer(
+                num_actions=num_actions,
+                vocab_size=vocab_size,
+                num_layers=depth,
+                heads=heads,
+                key_dim=key_dim,
+                feed_forward_size=model_dim,
+                text_encoder=text_encoder,
+                seq_len=seq_len,
+                text_model_device='cpu',
+                token_learner=True,
+                learned_token_num=token_learner_num,
+                token_learner_dropout=0.1,
+                transformer_dropout=0.1,
+                return_last=True,
+        )
+    elif args.model == "fusion":
+        model = RT1_fusion(
+            num_actions=2,
+            vocab_size=256,
+            fusion_layers=8,
+            fusion_nhead=8,
+            transformer_layers=2,
+            transformer_nhead=8,
+            key_dim=4096,
+            feed_forward_size=512,
+            text_encoder='t5',
+            seq_len=6,
             text_model_device='cpu',
-            token_learner=True,
-            learned_token_num=token_learner_num,
+            token_learner=False,
+            learned_token_num=8,
             token_learner_dropout=0.1,
             transformer_dropout=0.1,
+            feature_dropout=0.1,
             return_last=True,
-    )
+            d_model=512,
+        )
     model.to(device)
     optimizer = get_optimizer(args, model)
     if scheduler == "cosine":
