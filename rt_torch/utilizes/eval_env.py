@@ -34,7 +34,7 @@ def save_video(rgbs, path, rank, ep_reward, eval_eps):
     eval_eps = str(eval_eps)
     file_name = f"{rank}_{eval_eps.zfill(3)}_Rew_{ep_reward}.mp4"
     output_file = os.path.join(path, file_name)
-    frame_rate = 10
+    frame_rate = 5
     height, width, channels = rgbs[0].shape
     fourcc = cv.VideoWriter_fourcc(*'mp4v')
     video_writer = cv.VideoWriter(output_file, fourcc, frame_rate, (width, height))
@@ -57,7 +57,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
     env = language_table.LanguageTable(
         block_mode=blocks.LanguageTableBlockVariants.BLOCK_8,
         reward_factory=block2block.BlockToBlockReward,
-        control_frequency=10.0,
+        control_frequency=5,
         # seed=0,
     )
     # import pdb; pdb.set_trace()

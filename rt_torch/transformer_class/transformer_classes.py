@@ -156,6 +156,21 @@ class TransformerBlocks(nn.Module):
             x = x[:, -1]  # b (t n) d
             # print(f"x after {x.shape}")
         return self.output_tokens(x)
+    
+class CrossAttention(nn.Module):
+    def __init__(self,
+                 query_dim,
+                 key_dim,
+                 value_dim,
+                 ) -> None:
+        super().__init__()
+        
+
+
+class LanguageVisionFusion(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        
 
 if __name__ == "__main__":
     t_block = TransformerBlocks(num_layers=1, key_dim=512, num_heads=8, feed_forward_size=512, vocab_size=256)
