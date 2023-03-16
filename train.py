@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.models import EfficientNet_B3_Weights
 from tqdm import tqdm
 from rt_torch.rt1.rt_vanilla import RT1_transformer
-# from rt_torch.rt1.rt_fusion import RT1_fusion
+from rt_torch.rt1.rt_fusion import RT1_fusion
 from rt_torch.dataset.dataset_npz import build_language_table_ds
 from rt_torch.tokenizers.action_tokenizer import ActionTokenizer
 from collections import defaultdict
@@ -77,7 +77,7 @@ parser.add_argument('--adam_beta2', default=0.99, type=float, help="")
 parser.add_argument('--adam_eps', default=1e-8, type=float, help="")
 parser.add_argument('--weight_decay', default=0, type=float, help="")
 parser.add_argument('--sgd_momentum', default=0, type=float, help="")
-parser.add_argument('--model', default="vanilla", type=float, help="")
+parser.add_argument('--model', default="vanilla", type=str, help="")
 
 
 
@@ -104,7 +104,7 @@ def log_init(args=None):
         log_name = os.path.basename(args.load_path) + "-" + time.strftime("%m%d-%H%M%S",time.localtime())
     else:
         time_str = time.strftime("%m%d-%H%M%S",time.localtime()) + "-"
-        log_name = f"{args.text_encoder}-{args.lr}-{args.lr_t}-{args.lr_eff}-{args.depth}-{args.key_dim}-{args.alias}"
+        log_name = f"{args.text_encoder}-{args.lr}-{args.lr_t}-{args.lr_eff}-{args.depth}-{args.model_dim}-{args.alias}"
         log_name = time_str + log_name
     log_path = os.path.join(history, log_name)
     models_path = os.path.join(log_path, 'models')
@@ -220,37 +220,25 @@ def main(args):
         )
     elif args.model == "fusion":
         model = RT1_fusion(
-            num_actions=2,
-            vocab_size=256,
-            fusion_layers=8,
-            fusion_nhead=8,
+            num_actions=num_actions,
+            vocab_size=vocab_size,
+            fusion_layers=4,
+            fusion_nhead=heads,
             transformer_layers=2,
-            transformer_nhead=8,
-            key_dim=4096,
-            feed_forward_size=512,
+            transformer_nhead=heads,
+            feed_forward_size=model_dim,
             text_encoder='t5',
-            seq_len=6,
+            seq_len=seq_len,
             text_model_device='cpu',
             token_learner=False,
-            learned_token_num=8,
-            token_learner_dropout=0.1,
-            transformer_dropout=0.1,
-            feature_dropout=0.1,
+            dropout=0.1,
             return_last=True,
-            d_model=512,
+            d_model=model_dim,
         )
     model.to(device)
     optimizer = get_optimizer(args, model)
     if scheduler == "cosine":
         lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_iters, eta_min=lr_min)
-
-    if warmup:
-        warmup_scheduler = WarmUpScheduler(optimizer, lr_scheduler,
-                                        len_loader=len(train_loader),
-                                        warmup_steps=1000,
-                                        warmup_start_lr=0,
-                                        warmup_mode='linear',
-                                        )
     if load_path is not None:
         model_path = os.path.join(load_path, 'models')
         file_models = sorted(os.listdir(model_path))
@@ -271,8 +259,8 @@ def main(args):
     getModelSize(model, logger)
     logger.info(f"\nfilm_efficientnet_b3:")
     getModelSize(model.image_tokenizer.film_efficient_net, logger)
-    logger.info(f"\nTokenLearner:")
-    getModelSize(model.image_tokenizer.token_learner, logger)
+    # logger.info(f"\nTokenLearner:")
+    # getModelSize(model.image_tokenizer.token_learner, logger)
     logger.info(f"\ntext embedding:")
     getModelSize(model.text_tokenizer.text_model.t5, logger)
     logger.info(f"\nTransformer:")
@@ -311,9 +299,7 @@ def main(args):
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), norm_clip)
         optimizer.step()
-        if warmup:
-            warmup_scheduler.step()
-        elif scheduler is not None:
+        if scheduler is not None:
             lr_scheduler.step()
         pbar.update(1)
         # time0 = time.time()
@@ -360,7 +346,11 @@ def test(args, model, test_data_iterator, logger, writer, iteration):
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.device_idx
+    if args.device == "cpu":
+        os.environ['CUDA_VISIBLE_DEVICES'] = ""
+    else:
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.device_idx
+    # print(os.environ)
     # if args.load_path is not None:
     #     load_path = args.load_path
     #     if args.load_args:

@@ -9,14 +9,6 @@ def str2bool(x):
 def get_parser_for_basic_args():
     parser = ArgumentParser("Basic Configuration")
 
-    parser.add_argument(
-        "--model",
-        type=str,
-        choices=["gpt", "transformer_xl"],
-        default="transformer_xl",
-        help="Choose the language model to use.",
-    )
-
     parser.add_argument('--device', default="cuda", type=str)
     parser.add_argument('--text_encoder', default="t5", type=str)
     parser.add_argument('--batch_size', default=96, type=int, help='batch size')
@@ -38,6 +30,7 @@ def get_parser_for_basic_args():
     parser.add_argument("--eval-eps", default=10, type=int)
     parser.add_argument("--eval-timeout", default=300, type=int)
     parser.add_argument('--load_args', action='store_true', help="load the args")
+    parser.add_argument('--model', default="vanilla", type=str, help="")
 
 
     parser.add_argument("--load-dir", type=str, help="Path of checkpoint to load.")

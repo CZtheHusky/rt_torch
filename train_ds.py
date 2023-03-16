@@ -2,6 +2,7 @@ from rt_torch.utilizes.train_args import parse_args
 import os
 import shutil
 from rt_torch.rt1.rt_vanilla import RT1_transformer
+from rt_torch.rt1.rt_fusion import RT1_fusion
 # from rt_torch.rt1.rt_xl import RT1_transformerxl
 from rt_torch.dataset.dataset_npz import build_language_table_ds
 import logging
@@ -29,22 +30,40 @@ def main(args):
     token_learner_num = args.token_learner_num
     args.loader_shuffle = True if args.loader_shuffle else False
     loader_bs = args.loader_bs
-    model = RT1_transformer(
+    if args.model == "vanilla":
+        model = RT1_transformer(
+                num_actions=num_actions,
+                vocab_size=vocab_size,
+                num_layers=depth,
+                heads=heads,
+                key_dim=key_dim,
+                feed_forward_size=model_dim,
+                text_encoder=text_encoder,
+                seq_len=seq_len,
+                text_model_device='cpu',
+                token_learner=True,
+                learned_token_num=token_learner_num,
+                token_learner_dropout=0.1,
+                transformer_dropout=0.1,
+                return_last=True,
+        )
+    elif args.model == "fusion":
+        model = RT1_fusion(
             num_actions=num_actions,
             vocab_size=vocab_size,
-            num_layers=depth,
-            heads=heads,
-            key_dim=key_dim,
+            fusion_layers=4,
+            fusion_nhead=heads,
+            transformer_layers=2,
+            transformer_nhead=heads,
             feed_forward_size=model_dim,
-            text_encoder=text_encoder,
+            text_encoder='t5',
             seq_len=seq_len,
             text_model_device='cpu',
-            token_learner=True,
-            learned_token_num=token_learner_num,
-            token_learner_dropout=0.1,
-            transformer_dropout=0.1,
+            token_learner=False,
+            dropout=0.1,
             return_last=True,
-    )
+            d_model=model_dim,
+        )
     optimizer = get_optimizer(args, model)
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     log_path = args.log_path
@@ -118,14 +137,6 @@ def main(args):
     if rank == 0:
         pbar = tqdm(range(args.train_iters))
     while iteration < args.train_iters:
-        losses = train_step(args, model_engine, train_data_iterator)
-        if rank == 0 and model_engine.monitor.enabled:
-            mean_loss = np.mean(losses)
-            summary_events = [
-                (f'Train/Samples/train_loss-iter', float(mean_loss), iteration), 
-                ]
-            summary_events.append((f"Train/Samples/lr-iter", model_engine.get_lr()[0], iteration))
-            model_engine.monitor.write_events(summary_events)
         args.iteration = iteration
         if args.test_interval and iteration % args.test_interval == 0 or iteration == args.train_iters:
             local_eval_rewards = eval_in_env(args, model_engine, log_path, rank, iteration)
@@ -168,6 +179,23 @@ def main(args):
                         ]
                     model_engine.monitor.write_events(summary_events)
                 # logger.info(f"Iteration: {model_engine.global_samples}, Test Loss: {total_loss:.5f}")
+        losses = train_step(args, model_engine, train_data_iterator)
+        losses = np.mean(losses)
+        total_train_loss = [None for _ in range(world_size)]
+        dist.gather_object(
+            obj=losses, 
+            object_gather_list=total_train_loss if rank == 0 else None, 
+            dst=0,
+        )
+        if rank == 0 and model_engine.monitor.enabled:
+            mean_loss = np.mean(total_train_loss)
+            loss_var = np.var(total_train_loss)
+            summary_events = [
+                (f'Train/Samples/train_loss-iter', float(mean_loss), iteration), 
+                (f'Train/Samples/train_loss_var-iter', float(loss_var), iteration), 
+                ]
+            summary_events.append((f"Train/Samples/lr-iter", model_engine.get_lr()[0], iteration))
+            model_engine.monitor.write_events(summary_events)
         iteration += 1
         if rank == 0:
             # loss = sum(losses) / len(losses)

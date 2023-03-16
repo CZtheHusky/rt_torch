@@ -26,7 +26,6 @@ class film_EfficientNet(nn.Module):
             norm_layer: Optional[Callable[..., nn.Module]] = None,
             last_channel: Optional[int] = None,
             conditioning: bool = True,
-            text_embedding_dim: int = 768,
             **kwargs: Any,
     ) -> None:
         """
@@ -60,10 +59,10 @@ class film_EfficientNet(nn.Module):
 
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-        self.conditioning = conditioning
-        self.text_embedding_dim = text_embedding_dim
+        self.conditioning = kwargs.get("conditioning")
+        self.text_embedding_dim = kwargs.get("text_embedding_dim")
         self.features = nn.ModuleList([])
-        if conditioning:
+        if self.conditioning:
             self.conditioning_layers = nn.ModuleList([])
         # building first layer
         firstconv_output_channels = inverted_residual_setting[0].input_channels
@@ -90,8 +89,8 @@ class film_EfficientNet(nn.Module):
 
                 # adjust stochastic depth probability based on the depth of the stage block
                 sd_prob = stochastic_depth_prob * float(stage_block_id) / total_stage_blocks
-                if conditioning:
-                    self.conditioning_layers.append(FiLM(text_embedding_dim, block_cnf.out_channels))
+                if self.conditioning:
+                    self.conditioning_layers.append(FiLM(self.text_embedding_dim, block_cnf.out_channels))
                 # self.features.append(block_cnf.block(block_cnf, sd_prob, norm_layer))
 
                 stage.append(block_cnf.block(block_cnf, sd_prob, norm_layer))
@@ -129,11 +128,12 @@ class film_EfficientNet(nn.Module):
                 nn.init.uniform_(m.weight, -init_range, init_range)
                 nn.init.zeros_(m.bias)
         # import pdb; pdb.set_trace()
-        for film_layer in self.conditioning_layers:
-            nn.init.zeros_(film_layer.add.weight)
-            nn.init.zeros_(film_layer.add.bias)
-            nn.init.zeros_(film_layer.mult.weight)
-            nn.init.zeros_(film_layer.mult.bias)
+        if self.conditioning:
+            for film_layer in self.conditioning_layers:
+                nn.init.zeros_(film_layer.add.weight)
+                nn.init.zeros_(film_layer.add.bias)
+                nn.init.zeros_(film_layer.mult.weight)
+                nn.init.zeros_(film_layer.mult.bias)
 
     def forward(
             self,
@@ -185,14 +185,12 @@ def _film_efficientnet(
         last_channel: Optional[int],
         weights: Optional[WeightsEnum],
         progress: bool,
-        text_embedding_dim: int,
         **kwargs: Any,
 ) -> film_EfficientNet:
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
 
-    model = film_EfficientNet(inverted_residual_setting, dropout, last_channel=last_channel,
-                              text_embedding_dim=text_embedding_dim, **kwargs)
+    model = film_EfficientNet(inverted_residual_setting, dropout, last_channel=last_channel, **kwargs)
     # orig_state = weights.get_state_dict(progress=progress)
     # cur_state = model.state_dict()
     if weights is not None:
@@ -203,7 +201,6 @@ def _film_efficientnet(
 
 def film_efficientnet_b3(
         *, weights: Optional[EfficientNet_B3_Weights] = None, progress: bool = True, last_channel: int = None,
-        text_embedding_dim: int = 768,
         **kwargs: Any
 ) -> film_EfficientNet:
     """EfficientNet B3 model architecture from the `EfficientNet: Rethinking Model Scaling for Convolutional
@@ -227,8 +224,7 @@ def film_efficientnet_b3(
     weights = EfficientNet_B3_Weights.verify(weights)
 
     inverted_residual_setting, _ = _efficientnet_conf("efficientnet_b3", width_mult=1.2, depth_mult=1.4)
-    return _film_efficientnet(inverted_residual_setting, 0.3, last_channel, weights, progress,
-                              text_embedding_dim=text_embedding_dim, **kwargs)
+    return _film_efficientnet(inverted_residual_setting, 0.3, last_channel, weights, progress, **kwargs)
 
 
 # Class for Postprocessing model's output
