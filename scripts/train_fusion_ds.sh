@@ -19,7 +19,7 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=2800
+GLOBAL_BATCH=2400
 MICRO_BATCH=200
 
 cur_data="`date +%m%d`"
@@ -31,22 +31,24 @@ min_lr=1e-6
 heads=4
 depth=0
 model_dim=256
+model_type="fusion"
 fp16="True"
 # host="localhost:1,2,3"
 # host="localhost:4,5,6"
-host="localhost:1,2,3,4,5,6,7"
-alias="deepspeed-fusion"
-text_encoder="t5"
-exp_name="/home/cz/bs/rt_torch/history/$cur_data-$cur_time-$text_encoder-$lr-$lr_t-$lr_eff-$depth-$key_dim-$alias"
+host="localhost:0,1,2"
+alias="deepspeed-$model_type"
+text_encoder="use_tf"
+exp_name="/home/cz/bs/rt_torch/history/$cur_data-$cur_time-$text_encoder-$lr-$lr_t-$lr_eff-$depth-$model_dim-$alias"
+    
 
 cat <<EOT > $DS_CONFIG
 {
     "train_batch_size" : $GLOBAL_BATCH,
     "train_micro_batch_size_per_gpu": $MICRO_BATCH,
-    "gradient_accumulation_steps": 2,
-    
+    "gradient_accumulation_steps": 4,
+
     "fp16": {
-        "enabled": true,
+        "enabled": True,
         "initial_scale_power": 12
     },
 
@@ -126,4 +128,5 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --eval-eps 10 \
     --eval-timeout 100 \
     --alias $alias \
+    --model $model_type \
     $ds_args

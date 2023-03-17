@@ -31,13 +31,16 @@ class RT1_transformer(nn.Module):
     ):
         super().__init__()
         self.action_tokenizer = ActionTokenizer()
-        self.image_tokenizer = ImageTokenizer(use_token_leraner=token_learner, 
-                                              num_tokens=learned_token_num, 
-                                              dropout_rate=token_learner_dropout)
-        self.image_embed_dim = self.image_tokenizer._embedding_output_dim
-        self.text_tokenizer = TextTokenizer(name=text_encoder, 
+        self.text_tokenizer = TextTokenizer(name=text_encoder,
                                             device=text_model_device)
+        self.text_embed_dim = self.text_tokenizer.text_embed_dim
+        self.image_tokenizer = ImageTokenizer(use_token_leraner=token_learner,
+                                              num_tokens=learned_token_num,
+                                              dropout_rate=token_learner_dropout,
+                                              text_embedding_dim=self.text_embed_dim,
+                                              conditioning=False)
         self.num_learned_tokens = self.image_tokenizer._num_tokens
+        self.image_embed_dim = self.image_tokenizer._embedding_output_dim
         self.transformer = TransformerBlocks(num_actions=num_actions, 
                                              num_layers=num_layers,
                                              key_dim=key_dim, 

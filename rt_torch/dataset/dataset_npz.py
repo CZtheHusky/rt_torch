@@ -65,8 +65,11 @@ dataset_paths = {
 
 sub_datas = ["mix"] + list(dataset_paths.keys())
 
+text_encoder_path = {"use":"/inst_embedding_use",
+                 "t5":"/inst_embedding_t5",
+                  "use_tf": "/inst_embedding_use_tf"}
 
-def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=False, sub_data="mix"):
+def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=False, sub_data="mix", text_encoder="t5"):
     if seed:
         np.random.seed(seed)
     ds_stats = {}
@@ -77,14 +80,14 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=
         obs_path = v + "/observations"
         act_path = v + "/actions"
         inst_path = obs_path + "/instructions"
-        inst_embed_t5_path = obs_path + "/inst_embedding_t5"
+        inst_embed_path = obs_path + text_encoder_path[text_encoder]
         rgb_path = obs_path + "/rgbs"
         rew_path = v + "/rewards"
         traj_len_path = v + "/traj_len.npz"
         try:
             traj_len = np.load(traj_len_path)['arr_0']
-            if os.path.exists(inst_embed_t5_path):
-                assert 1 == len(set([len(os.listdir(act_path)), len(os.listdir(inst_path)), len(os.listdir(rgb_path)), len(os.listdir(rew_path)), len(os.listdir(inst_embed_t5_path)), len(traj_len)]))
+            if os.path.exists(inst_embed_path):
+                assert 1 == len(set([len(os.listdir(act_path)), len(os.listdir(inst_path)), len(os.listdir(rgb_path)), len(os.listdir(rew_path)), len(os.listdir(inst_embed_path)), len(traj_len)]))
                 inst_embed_status = True
             else:
                 assert 1 == len(set([len(os.listdir(act_path)), len(os.listdir(inst_path)), len(os.listdir(rgb_path)), len(os.listdir(rew_path)), len(traj_len)]))
@@ -96,7 +99,7 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=
                     "instruction": inst_path,
                     "rgb": rgb_path,
                     "reward": rew_path,
-                    "inst_embed": inst_embed_t5_path if inst_embed_status else None,
+                    "inst_embed": inst_embed_path if inst_embed_status else None,
                     "traj_len": traj_len_path,
                 },
                 "num_ep": size,
@@ -147,12 +150,12 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=
         indices_index[k]["train"] = total_indexes[:train_indice_num]
         indices_index[k]["test"] = total_indexes[train_indice_num:]
 
-    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb)
-    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb)
+    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb, text_encoder=text_encoder)
+    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb, text_encoder=text_encoder)
     return train_set, test_set
 
 class language_table_dataset_npz(Dataset):
-    def __init__(self, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96, dumb=False) -> None:
+    def __init__(self, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96, dumb=False, text_encoder="t5") -> None:
         super().__init__()
         self.mode = mode
         self.ds_stats = ds_stats
@@ -166,6 +169,7 @@ class language_table_dataset_npz(Dataset):
         self.bucket = [0]
         self.dumb = dumb
         self.dumb_tmp = None
+        self.text_embed_dim = 768 if text_encoder == "t5" else 512
         for k, v in self.indices_index.items():
             self.len += len(v[mode])
             self.bucket.append(self.len)
@@ -220,7 +224,7 @@ class language_table_dataset_npz(Dataset):
         # padding_detail = "padding: "
         if ep_start_idx < self.seq_len - 1:
             rgbs[0] = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 3, 300, 300), rgbs[0]])
-            insts = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 768), insts])
+            insts = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, self.text_embed_dim), insts])
             # padding_detail += f"length {self.seq_len - ep_start_idx}\n"
         else:
             # padding_detail += f"None\n"

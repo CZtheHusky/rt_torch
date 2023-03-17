@@ -61,6 +61,10 @@ def eval_in_env(args, model, video_path, rank, iteration):
         # seed=0,
     )
     # import pdb; pdb.set_trace()
+    if args.text_encoder == "t5":
+        text_embed_dim = 768
+    else:
+        text_embed_dim = 512
     with torch.no_grad():
         root_path = os.path.join(video_path, "videos")
         iteration = str(iteration).zfill(8)
@@ -68,6 +72,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
         os.makedirs(video_path, exist_ok=True)
         videos = []
         rewards = []
+        ep_length = []
         env_obs = env.reset()
         # import pdb; pdb.set_trace()
         instruction = nlp_inst_decoder(env_obs['instruction'])
@@ -81,7 +86,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
             rgb_video.append(env_obs['rgb'])
             videos.append(env.render())
             rgbs = deque([torch.zeros([300, 300, 3])] * 5, maxlen=6)
-            inst_buffer = deque([torch.zeros(768)] * 5, maxlen=5)
+            inst_buffer = deque([torch.zeros(text_embed_dim)] * 5, maxlen=5)
             while eval_eps < 10:
                 rgbs.append(rgb)
                 # import pdb; pdb.set_trace()
@@ -94,6 +99,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
                 videos.append(env.render())
                 if terminal or ep_steps >= 100:
                     rewards.append(ep_reward)
+                    ep_length.append(ep_steps)
                     save_video(videos, video_path, rank, ep_reward, eval_eps)
                     save_video(rgb_video, video_path, rank, ep_reward, eval_eps + 10)
                     ep_reward = 0
@@ -112,7 +118,6 @@ def eval_in_env(args, model, video_path, rank, iteration):
         else:
             fp16 = args.fp16
             device = args.device
-            model.text_tokenizer.text_model.t5 = model.text_tokenizer.text_model.t5.to(device)
             rgb = frame_resize(env_obs['rgb'], fp16, device)
             videos.append(env.render()[:,:,::-1])
             model.eval()
@@ -121,7 +126,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
                 inst_tmp = [torch.zeros(768, dtype=torch.half, device=device)] * 5
             else:
                 rgbs_tmp = [torch.zeros([3, 300, 300], dtype=torch.float, device=device)] * 5
-                inst_tmp = [torch.zeros(768, dtype=torch.float, device=device)] * 5
+                inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.float, device=device)] * 5
             rgbs = deque(rgbs_tmp, maxlen=6)
             inst_buffer = deque(inst_tmp, maxlen=5)
             while eval_eps < args.eval_eps:
@@ -139,6 +144,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
                     # if ep_steps >= args.eval_timeout:
                     #     rewards.append(0)
                     # else:
+                    ep_length.append(ep_steps)
                     rewards.append(ep_reward)
                     save_video(videos, video_path, rank, ep_reward, eval_eps)
                     ep_steps = 0
@@ -151,7 +157,6 @@ def eval_in_env(args, model, video_path, rank, iteration):
                     videos = []
                     videos.append(env.render()[:,:,::-1])
                     eval_eps += 1
-            model.text_tokenizer.text_model.t5 = model.text_tokenizer.text_model.t5.to("cpu")
         if rank == 0:
             video_dirs = os.listdir(root_path)
             if len(video_dirs) > 10:
@@ -159,7 +164,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
                 num = len(video_dirs) - 10
                 for i in range(num):
                     shutil.rmtree(os.path.join(root_path, video_dirs[i]))
-        return np.array(rewards).mean()
+        return np.array([np.array(rewards).mean(), np.array(ep_length).mean()])
 
 
 

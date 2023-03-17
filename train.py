@@ -23,7 +23,7 @@ from collections import deque
 from torch.optim import Adam, SGD, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 # from warmup_scheduler_pytorch import WarmUpScheduler
-import tensorflow as tf
+# import tensorflow as tf
 from itertools import islice
 from rt_torch.utilizes.optimizer_param_scheduler import OptimizerParamScheduler
 from rt_torch.utilizes.eval_env import eval_in_env
@@ -42,12 +42,12 @@ parser.add_argument('--loader_bs', default=1, type=int, help='')
 parser.add_argument('--loader_shuffle', default=True, type=bool, help="")
 parser.add_argument('--loader_worker', default=16, type=int, help='')
 parser.add_argument('--train-iters', default=500000, type=int, help='train_iters')
-parser.add_argument('--test-iters', default=500, type=int, help='test_iter')
+parser.add_argument('--test-iters', default=100, type=int, help='test_iter')
 parser.add_argument('--iteration', default=0, type=int, help='iteration')
 parser.add_argument('--norm_clip', default=40, type=int, help='clip norm')
-parser.add_argument('--test-interval', default=10000, type=int, help='test_interval')
+parser.add_argument('--test-interval', default=2500, type=int, help='test_interval')
 parser.add_argument('--seed', default=100, type=int, help='')
-parser.add_argument('--save-interval', default=10000, type=int)
+parser.add_argument('--save-interval', default=2500, type=int)
 parser.add_argument('--alias', default="", type=str, help="alias of the experiment")
 parser.add_argument('--sub_data', default="mix", type=str, help="data for training")
 parser.add_argument('--max_save_num', default=5, type=int)
@@ -59,7 +59,6 @@ parser.add_argument('--vocab_size', default=256, type=int)
 parser.add_argument('--num_actions', default=2, type=int)
 parser.add_argument('--token_learner_num', default=8, type=int)
 parser.add_argument('--seq_len', default=6, type=int)
-parser.add_argument('--scheduler_t', default=5, type=int)
 parser.add_argument('--lr', default=1e-5, type=float)
 parser.add_argument('--lr_t', default=1, type=float)
 parser.add_argument('--lr_eff', default=1, type=float)
@@ -71,7 +70,6 @@ parser.add_argument('--eval-eps', default=10, type=int)
 parser.add_argument('--eval-timeout', default=100, type=int)
 parser.add_argument('--optimizer', default="adam", type=str, help="type of the optimizer")
 parser.add_argument('--scheduler', default=None, type=str, help="")
-parser.add_argument('--warmup', action='store_true', help="using warmup scheduler")
 parser.add_argument('--adam_beta1', default=0.9, type=float, help="")
 parser.add_argument('--adam_beta2', default=0.99, type=float, help="")
 parser.add_argument('--adam_eps', default=1e-8, type=float, help="")
@@ -180,10 +178,8 @@ def main(args):
     sub_data = args.sub_data
     text_encoder = args.text_encoder
     load_path = args.load_path
-    warmup = args.warmup
     logger, writer, save_path, log_path, handler = log_init(args)
     scheduler = args.scheduler
-    scheduler_t = args.scheduler_t
     depth = args.depth
     heads = args.heads
     key_dim = args.key_dim
@@ -198,9 +194,15 @@ def main(args):
 
     print('device: ', device)
     
-    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size, seq_len=seq_len, seed=seed, dumb=False, sub_data="language_table_sim")
+    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size, seq_len=seq_len, seed=seed, dumb=False, sub_data="language_table_sim", text_encoder=text_encoder)
     train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
     test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
+    if args.text_encoder == "use_tf":
+        import tensorflow as tf
+        gpus = tf.config.list_physical_devices('GPU')
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+
     if args.model == "vanilla":
         model = RT1_transformer(
                 num_actions=num_actions,
@@ -211,7 +213,7 @@ def main(args):
                 feed_forward_size=model_dim,
                 text_encoder=text_encoder,
                 seq_len=seq_len,
-                text_model_device='cpu',
+                text_model_device=args.device,
                 token_learner=True,
                 learned_token_num=token_learner_num,
                 token_learner_dropout=0.1,
@@ -227,9 +229,9 @@ def main(args):
             transformer_layers=2,
             transformer_nhead=heads,
             feed_forward_size=model_dim,
-            text_encoder='t5',
+            text_encoder=text_encoder,
             seq_len=seq_len,
-            text_model_device='cpu',
+            text_model_device=args.device,
             token_learner=False,
             dropout=0.1,
             return_last=True,
@@ -261,14 +263,14 @@ def main(args):
     getModelSize(model.image_tokenizer.film_efficient_net, logger)
     # logger.info(f"\nTokenLearner:")
     # getModelSize(model.image_tokenizer.token_learner, logger)
-    logger.info(f"\ntext embedding:")
-    getModelSize(model.text_tokenizer.text_model.t5, logger)
+    # logger.info(f"\ntext embedding:")
+    # getModelSize(model.text_tokenizer.text_model.t5, logger)
     logger.info(f"\nTransformer:")
     getModelSize(model.transformer, logger)
 
 
     print(f"split: train-{len(train_loader)}, test-{len(test_loader)}")
-    # train_loss = deque(maxlen=100)
+    train_loss = deque(maxlen=100)
 
     # avg_time = {"data_prep": 0, "inference": 0, "gradient_step": 0}
 
@@ -284,10 +286,12 @@ def main(args):
         args.iteration = iteration
         if test_interval != 0 and iteration % test_interval == 0:
             model.eval()
-            eval_rewards = eval_in_env(args, model, log_path, 0, iteration)
-            writer.add_scalar('Train/Samples/eval_reward', float(eval_rewards), iteration * batch_size)
-            writer.add_scalar('Train/Samples/eval_reward-iter', float(eval_rewards), iteration)
-            logger.info(f"Iteration: {iteration}, eval_reward: {eval_rewards:.5f}")
+            eval_res = eval_in_env(args, model, log_path, 0, iteration)
+            writer.add_scalar('Train/Samples/eval_reward', float(eval_res[0]), iteration * batch_size)
+            writer.add_scalar('Train/Samples/eval_reward-iter', float(eval_res[0]), iteration)
+            writer.add_scalar('Train/Samples/ep_length', float(eval_res[1]), iteration * batch_size)
+            writer.add_scalar('Train/Samples/ep_length-iter', float(eval_res[1]), iteration)
+            logger.info(f"Iteration: {iteration}, eval_reward: {eval_res[0]:.5f}")
             test(args, model, test_data_iterator, logger, writer, iteration)
             model.train()
         model.train()
@@ -306,15 +310,14 @@ def main(args):
         # avg_time["inference"] += (time2 - time1)
         # avg_time["gradient_step"] += (time0 - time2)
         iteration += 1
-        train_loss = loss.detach().cpu().item()
+        train_loss.append(loss.detach().cpu().item())
         # print(loss_step)
-        # mean_loss = np.mean(list(train_loss))
+        mean_loss = np.mean(list(train_loss))
         if scheduler is not None:
             writer.add_scalar('Train/Samples/lr', float(lr_scheduler.get_last_lr()[0]), iteration * batch_size)
             writer.add_scalar('Train/Samples/lr-iter', float(lr_scheduler.get_last_lr()[0]), iteration)
-        writer.add_scalar('Train/Samples/train_loss', float(train_loss), iteration * batch_size)
-        writer.add_scalar('Train/Samples/train_loss-iter', float(train_loss), iteration)
-        logger.info(f"Iteration: {iteration}, Loss: {train_loss:.5f}")
+        writer.add_scalar('Train/Samples/train_loss', float(mean_loss), iteration * batch_size)
+        writer.add_scalar('Train/Samples/train_loss-iter', float(mean_loss), iteration)
 
             # for key, value in avg_time.items():
             #     logger.info(f"{key}: {(value / loss_step):.2f}")
