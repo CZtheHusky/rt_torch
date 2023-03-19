@@ -9,8 +9,8 @@ import tensorflow_hub as hub
 
 class UniversalSentenceEncoder():
     def __init__(self, 
-                 name,
-                 device,
+                 name=None,
+                 device=None,
                  ) -> None:
         # module_url = "/home/cz/universal-sentence-encoder_4"
         # self.model = hub.load(module_url)
@@ -34,8 +34,8 @@ class UniversalSentenceEncoder():
     
 class UniversalSentenceEncoderTF():
     def __init__(self, 
-                 name,
-                 device,
+                 name=None,
+                 device=None,
                  ) -> None:
         module_url = "/home/cz/universal-sentence-encoder_4"
         self.model = hub.load(module_url)

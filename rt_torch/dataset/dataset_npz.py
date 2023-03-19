@@ -8,48 +8,7 @@ import torch.nn.functional as F
 from multiprocessing import Process, Pipe, Queue
 from multiprocessing.connection import Connection
 import os
-
-
-INPUT_SIZE = 300
-
-def rgb_preprocess(images,
-                   crop_size: int = INPUT_SIZE
-                   ):
-    """
-    EP_LEN * 360 * 640 * 3 to EP_LEN * 3 * 300 * 300
-    uint8 to float
-    """
-    # import pdb 
-    # pdb.set_trace()
-    images = torch.permute(images, (0, 3, 1, 2)).to(torch.float32)    # EP_LEN * 3 * 360 * 640
-    images = torch.nn.functional.interpolate(images, scale_factor=0.46875, mode="bilinear")  # EP_LEN * 3 * 168 * 300
-    images = torch.nn.functional.pad(images, (0, 0, 66, 66))    # EP_LEN * 3 * 300 * 300
-    images = images.float()
-    # images = torch.tensor(images).permute((2, 0, 1))
-    # images = images.unsqueeze(0)
-    # images = torch.nn.functional.interpolate(images, size=(crop_size, crop_size))
-    return images / 255
-
-"""
-x = B* ep_len * C * H * W
-x -> B x 6 x C x H x W
-
-
-
-x[:, 0:-6]
-x[:, 1:-5]
-
-(B x T-6) x 6 ....
-"""
-
-def frame_stack(images, stack_num):
-    tmp = [torch.zeros((3, 300, 300))] * (stack_num - 1)
-    frames = deque(tmp, maxlen=stack_num)
-    rgbs = []
-    for image in images:
-        frames.append(image)
-        rgbs.append(torch.stack(list(frames)))
-    return torch.stack(rgbs).permute(0, 2, 1, 3, 4) # EP_LEN 6 3 300 300 -> EP_LEN 3 6 300 300 
+from rt_torch.tokenizers.action_tokenizer import ActionTokenizer
 
 dataset_paths = {
     'language_table': '/raid/robotics_data/language_table_npz',
@@ -69,7 +28,12 @@ text_encoder_path = {"use":"/inst_embedding_use",
                  "t5":"/inst_embedding_t5",
                   "use_tf": "/inst_embedding_use_tf"}
 
-def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=False, sub_data="mix", text_encoder="t5"):
+def build_language_table_ds(args, split=0.9, dumb=False):
+    batch_size = args.batch_size
+    seq_len = args.seq_len
+    sub_data = args.sub_data
+    text_encoder = args.text_encoder
+    seed = args.seed
     if seed:
         np.random.seed(seed)
     ds_stats = {}
@@ -84,6 +48,7 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=
         rgb_path = obs_path + "/rgbs"
         rew_path = v + "/rewards"
         traj_len_path = v + "/traj_len.npz"
+        quantile_path = v + "/action_quantiles.npy"
         try:
             traj_len = np.load(traj_len_path)['arr_0']
             if os.path.exists(inst_embed_path):
@@ -104,6 +69,7 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=
                 },
                 "num_ep": size,
                 "current_idx": 0,
+                "quantile_path": quantile_path,
             }
         except Exception as e:
             pass
@@ -150,12 +116,12 @@ def build_language_table_ds(split=0.9, batch_size=16, seq_len=6, seed=100, dumb=
         indices_index[k]["train"] = total_indexes[:train_indice_num]
         indices_index[k]["test"] = total_indexes[train_indice_num:]
 
-    train_set = language_table_dataset_npz(mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb, text_encoder=text_encoder)
-    test_set = language_table_dataset_npz(mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb, text_encoder=text_encoder)
+    train_set = language_table_dataset_npz(args, mode="train", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb, text_encoder=text_encoder)
+    test_set = language_table_dataset_npz(args, mode="test", indices_index=indices_index, indices=indices, ds_stats=ds_stats, seq_len=seq_len, batch_size=batch_size, dumb=dumb, text_encoder=text_encoder)
     return train_set, test_set
 
 class language_table_dataset_npz(Dataset):
-    def __init__(self, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96, dumb=False, text_encoder="t5") -> None:
+    def __init__(self, args, mode, indices_index, indices, ds_stats, seq_len=6, batch_size=96, dumb=False, text_encoder="t5") -> None:
         super().__init__()
         self.mode = mode
         self.ds_stats = ds_stats
@@ -170,6 +136,7 @@ class language_table_dataset_npz(Dataset):
         self.dumb = dumb
         self.dumb_tmp = None
         self.text_embed_dim = 768 if text_encoder == "t5" else 512
+        self.action_tokenizer = ActionTokenizer(num_action_bin=args.vocab_size, quantile_path=self.ds_stats[args.sub_data]["quantile_path"])
         for k, v in self.indices_index.items():
             self.len += len(v[mode])
             self.bucket.append(self.len)
@@ -242,11 +209,13 @@ class language_table_dataset_npz(Dataset):
         # # print(indice_detail + loading_details + padding_detail + post_process_detail)
         # if total != len(insts) or total != len(acts) + 5:
         #     print(indice_detail + loading_details + padding_detail + post_process_detail)
-            # import pdb; pdb.set_trace()
+        
         split_idx = torch.ones(self.batch_size) * -1
         for idx, vid in enumerate(rgbs):
             split_idx[idx] = len(vid)
         rgbs = torch.cat(rgbs)
+        acts = self.action_tokenizer.discretize(acts).view(-1)
+        # import pdb; pdb.set_trace()
         return rgbs, insts, acts, split_idx
             
         

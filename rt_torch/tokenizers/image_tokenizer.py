@@ -18,8 +18,6 @@ class ImageTokenizer(nn.Module):
                  ) -> None:
         super().__init__()
         self.film_efficient_net = film_efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1,
-                                                       eff_last_channels=eff_last_channels,
-                                                       text_embedding_dim=text_embedding_dim,
                                                        kwargs={"text_embedding_dim": text_embedding_dim, "conditioning": conditioning})
         self._embedding_output_dim = eff_last_channels
         self.conv_out = nn.Conv2d(self.film_efficient_net.embed_dim, eff_last_channels, kernel_size=1, stride=1,
@@ -49,6 +47,7 @@ class ImageTokenizer(nn.Module):
                 text_embeddings: torch.Tensor=None,
                 ):
         image_tokens = self.film_efficient_net(images, text_embeddings)
+        # import pdb; pdb.set_trace()
         image_tokens = self.conv_out(image_tokens)
         if self.conditioning:
             image_tokens = self.film_layer(text_embeddings, image_tokens)

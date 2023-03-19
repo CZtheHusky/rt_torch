@@ -49,7 +49,7 @@ parser.add_argument('--test-interval', default=2500, type=int, help='test_interv
 parser.add_argument('--seed', default=100, type=int, help='')
 parser.add_argument('--save-interval', default=2500, type=int)
 parser.add_argument('--alias', default="", type=str, help="alias of the experiment")
-parser.add_argument('--sub_data', default="mix", type=str, help="data for training")
+parser.add_argument('--sub_data', default="language_table_sim", type=str, help="data for training")
 parser.add_argument('--max_save_num', default=5, type=int)
 parser.add_argument('--depth', default=2, type=int)
 parser.add_argument('--heads', default=8, type=int)
@@ -194,9 +194,9 @@ def main(args):
 
     print('device: ', device)
     
-    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size, seq_len=seq_len, seed=seed, dumb=False, sub_data="language_table_sim", text_encoder=text_encoder)
-    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
-    test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
+    train_set, test_set = build_language_table_ds(args, split=0.9, dumb=False)
+    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, shuffle=loader_shuffle)
+    test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, shuffle=loader_shuffle)
     if args.text_encoder == "use_tf":
         import tensorflow as tf
         gpus = tf.config.list_physical_devices('GPU')
@@ -234,9 +234,9 @@ def main(args):
             text_model_device=args.device,
             token_learner=False,
             dropout=0.1,
-            return_last=True,
             d_model=model_dim,
         )
+    text_embed_dim = model.text_embed_dim
     model.to(device)
     optimizer = get_optimizer(args, model)
     if scheduler == "cosine":
@@ -286,7 +286,7 @@ def main(args):
         args.iteration = iteration
         if test_interval != 0 and iteration % test_interval == 0:
             model.eval()
-            eval_res = eval_in_env(args, model, log_path, 0, iteration)
+            eval_res = eval_in_env(args, model, log_path, 0, iteration, text_embed_dim, train_set.action_tokenizer)
             writer.add_scalar('Train/Samples/eval_reward', float(eval_res[0]), iteration * batch_size)
             writer.add_scalar('Train/Samples/eval_reward-iter', float(eval_res[0]), iteration)
             writer.add_scalar('Train/Samples/ep_length', float(eval_res[1]), iteration * batch_size)

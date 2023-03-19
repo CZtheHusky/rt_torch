@@ -23,8 +23,5 @@ python /home/cz/bs/rt_torch/train.py --alias fusion-single --device_idx 5 --mode
 
 
 python /home/cz/bs/rt_torch/train.py --alias vanilla-use --device_idx 7 --model vanilla --scheduler cosine --lr 1e-5 --min_lr 1e-6 --text_encoder "use"
-python /home/cz/bs/rt_torch/train.py --alias vanilla-use_tf --device_idx 6 --model vanilla --scheduler cosine --lr 1e-5 --min_lr 1e-6 --text_encoder "use_tf"
 
 python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 5 --model fusion --scheduler cosine --lr 1e-5 --min_lr 1e-6 --heads 4 --model_dim 256 --text_encoder "use"
-python /home/cz/bs/rt_torch/train.py --alias fusion-use_tf --device_idx 4 --model fusion --scheduler cosine --lr 1e-5 --min_lr 1e-6 --heads 4 --model_dim 256 --text_encoder "use_tf"
-python /home/cz/bs/rt_torch/train.py --alias fusion-t5 --device_idx 3 --model fusion --scheduler cosine --lr 1e-5 --min_lr 1e-6 --heads 4 --model_dim 256 --text_encoder "t5"

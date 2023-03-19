@@ -25,7 +25,6 @@ class film_EfficientNet(nn.Module):
             num_classes: int = 1000,
             norm_layer: Optional[Callable[..., nn.Module]] = None,
             last_channel: Optional[int] = None,
-            conditioning: bool = True,
             **kwargs: Any,
     ) -> None:
         """

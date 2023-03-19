@@ -28,9 +28,10 @@ class RT1_transformer(nn.Module):
             token_learner_dropout=0.1,
             transformer_dropout=0.1,
             return_last=True,
+            quantile_path=None,
     ):
         super().__init__()
-        self.action_tokenizer = ActionTokenizer()
+        self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, quantile_path=quantile_path)
         self.text_tokenizer = TextTokenizer(name=text_encoder,
                                             device=text_model_device)
         self.text_embed_dim = self.text_tokenizer.text_embed_dim
@@ -111,10 +112,10 @@ class RT1_transformer(nn.Module):
             logits = logits[:, -1]
         # logits = logits.permute(0, 2, 1)
         logits = logits.view(-1, logits.shape[-1])
-        actions_discretes = self.action_tokenizer.discretize(actions)
-        actions_discretes = actions_discretes.view(-1)
+        # actions_discretes = self.action_tokenizer.discretize(actions)
+        # actions_discretes = actions_discretes.view(-1)
         # print(f"rank: {get_rank()}, inference: logits: {logits.shape}, actions_discretes: {actions_discretes.shape}")
-        loss = self.criterion(logits, actions_discretes)
+        loss = self.criterion(logits, actions)
         # print(f"rank: {get_rank()}, inference: {float(loss.item())}")
         # import pdb; pdb.set_trace()
         return loss
@@ -136,9 +137,9 @@ class RT1_transformer(nn.Module):
         # print(f"attn_mask: {attn_mask.shape}")
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
         # print(f"logits: {logits.shape}")
-        action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
+        # action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
         # print(f"action last: {action.shape}")
-        out = action.detach().cpu().numpy()
+        out = logits.detach().cpu().squeeze(0)
         # print(f"action: {out}")
         return out, texts_embeddings
 

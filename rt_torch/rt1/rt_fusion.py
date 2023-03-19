@@ -32,11 +32,11 @@ class RT1_fusion(nn.Module):
             dropout=0.1,
             ffn_res_dim=1024,
             ffn_res_blocks=2,
-            return_last=True,
+            quantile_path=None,
             d_model=512,
     ):
         super().__init__()
-        self.action_tokenizer = ActionTokenizer()
+        self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, quantile_path=quantile_path)
         self.text_tokenizer = TextTokenizer(name=text_encoder,
                                             device=text_model_device)
         self.text_embed_dim = self.text_tokenizer.text_embed_dim
@@ -136,10 +136,10 @@ class RT1_fusion(nn.Module):
         logits = self.action_proj(fused_embed)
         # logits = logits.permute(0, 2, 1)
         logits = logits.view(-1, logits.shape[-1])
-        actions_discretes = self.action_tokenizer.discretize(actions)
-        actions_discretes = actions_discretes.view(-1)
+        # actions_discretes = self.action_tokenizer.discretize(actions)
+        # actions_discretes = actions_discretes.view(-1)
         # print(f"rank: {get_rank()}, inference: logits: {logits.shape}, actions_discretes: {actions_discretes.shape}")
-        loss = self.criterion(logits, actions_discretes)
+        loss = self.criterion(logits, actions)
         # print(f"rank: {get_rank()}, inference: {float(loss.item())}")
         # import pdb; pdb.set_trace()
         return loss
@@ -147,6 +147,7 @@ class RT1_fusion(nn.Module):
     def inference(self, rgb, instruction, inst_buffer, device):
         # print(f"rgb: {rgb.shape}")
         # print(f"inst_buffer: {inst_buffer.shape}")
+        # import pdb; pdb.set_trace()
         texts_embeddings = self.text_tokenizer.embed_texts(instruction, device=device)
         texts_embeddings = texts_embeddings.to(inst_buffer.dtype)
         # print(f"texts_embeddings: {texts_embeddings.shape}")
@@ -158,9 +159,9 @@ class RT1_fusion(nn.Module):
         fused_embed = self.ffn_residual(fused_embed)
         logits = self.action_proj(fused_embed)
         # print(f"logits: {logits.shape}")
-        action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
+        # action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
         # print(f"action last: {action.shape}")
-        out = action.detach().cpu().numpy()
+        out = logits.detach().cpu().squeeze(0)
         # print(f"action: {out}")
         return out, texts_embeddings
 

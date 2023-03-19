@@ -27,7 +27,20 @@ import cv2 as cv
 import torch
 import numpy as np
 import shutil
+from torchvision import transforms
+from PIL import Image
+# helpers
 
+
+
+def frame_preprocess(transorm, img, fp16, device):
+    img = transorm(Image.fromarray(img))
+    if fp16:
+        img = img.astype(torch.half)
+    img = img.to(device)
+    return img
+
+    
 
 
 def save_video(rgbs, path, rank, ep_reward, eval_eps):
@@ -42,18 +55,10 @@ def save_video(rgbs, path, rank, ep_reward, eval_eps):
         video_writer.write(frame)
 
 
-def frame_resize(frame, fp16=False, device=None):
-    resized_rgb = cv.resize(frame, (300, 168))
-    # print(resized_rgb.shape)
-    resized_rgb = np.pad(resized_rgb, ((66, 66), (0, 0), (0, 0))).transpose(2, 0, 1) / 255
-    if fp16:
-        return torch.tensor(resized_rgb, dtype=torch.half, device=device if device else "cpu")
-    else:
-        return torch.tensor(resized_rgb, dtype=torch.float, device=device if device else "cpu")
 
 
 
-def eval_in_env(args, model, video_path, rank, iteration):
+def eval_in_env(args, model, video_path, rank, iteration, text_embed_dim, action_tokenizer):
     env = language_table.LanguageTable(
         block_mode=blocks.LanguageTableBlockVariants.BLOCK_8,
         reward_factory=block2block.BlockToBlockReward,
@@ -61,6 +66,10 @@ def eval_in_env(args, model, video_path, rank, iteration):
         # seed=0,
     )
     # import pdb; pdb.set_trace()
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
     if args.text_encoder == "t5":
         text_embed_dim = 768
     else:
@@ -81,12 +90,12 @@ def eval_in_env(args, model, video_path, rank, iteration):
         ep_reward = 0
         ep_steps = 0
         if args is None:
-            rgb = frame_resize(env_obs['rgb'])
+            rgb = transform(env_obs['rgb'])
             rgb_video = []
             rgb_video.append(env_obs['rgb'])
             videos.append(env.render())
-            rgbs = deque([torch.zeros([300, 300, 3])] * 5, maxlen=6)
-            inst_buffer = deque([torch.zeros(text_embed_dim)] * 5, maxlen=5)
+            rgbs = deque([torch.zeros([300, 300, 3])] * 5, maxlen=args.seq_len)
+            inst_buffer = deque([torch.zeros(text_embed_dim)] * 5, maxlen=args.seq_len - 1)
             while eval_eps < 10:
                 rgbs.append(rgb)
                 # import pdb; pdb.set_trace()
@@ -94,7 +103,7 @@ def eval_in_env(args, model, video_path, rank, iteration):
                 ep_steps += 1
                 instruction = nlp_inst_decoder(env_obs['instruction'])
                 rgb_video.append(env_obs['rgb'])
-                rgb = frame_resize(env_obs['rgb'])
+                rgb = transform(env_obs['rgb'])
                 ep_reward += reward
                 videos.append(env.render())
                 if terminal or ep_steps >= 100:
@@ -103,11 +112,11 @@ def eval_in_env(args, model, video_path, rank, iteration):
                     save_video(videos, video_path, rank, ep_reward, eval_eps)
                     save_video(rgb_video, video_path, rank, ep_reward, eval_eps + 10)
                     ep_reward = 0
-                    rgbs = deque([torch.ones(300, 300, 3)] * 5, maxlen=6)
-                    inst_buffer = deque([""] * 5, maxlen=6)
+                    rgbs = deque([torch.ones(300, 300, 3)] * 5, maxlen=args.seq_len)
+                    inst_buffer = deque([""] * 5, maxlen=args.seq_len - 1)
                     env_obs = env.reset()
                     instruction = nlp_inst_decoder(env_obs['instruction'])
-                    rgb = frame_resize(env_obs['rgb'])
+                    rgb = transform(env_obs['rgb'])
                     videos = []
                     if ep_steps == 100:
                         print(f"ep {eval_eps} timeout")
@@ -118,26 +127,29 @@ def eval_in_env(args, model, video_path, rank, iteration):
         else:
             fp16 = args.fp16
             device = args.device
-            rgb = frame_resize(env_obs['rgb'], fp16, device)
+            # import pdb; pdb.set_trace()
+            rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
             videos.append(env.render()[:,:,::-1])
             model.eval()
             if args.fp16:
-                rgbs_tmp = [torch.zeros([3, 300, 300], dtype=torch.half, device=device)] * 5
-                inst_tmp = [torch.zeros(768, dtype=torch.half, device=device)] * 5
+                rgbs_tmp = [torch.zeros(rgb.shape, dtype=torch.half, device=device)] * 5
+                inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.half, device=device)] * 5
             else:
-                rgbs_tmp = [torch.zeros([3, 300, 300], dtype=torch.float, device=device)] * 5
+                rgbs_tmp = [torch.zeros(rgb.shape, dtype=torch.float, device=device)] * 5
                 inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.float, device=device)] * 5
-            rgbs = deque(rgbs_tmp, maxlen=6)
-            inst_buffer = deque(inst_tmp, maxlen=5)
+            rgbs = deque(rgbs_tmp, maxlen=args.seq_len)
+            inst_buffer = deque(inst_tmp, maxlen=args.seq_len - 1)
             while eval_eps < args.eval_eps:
                 # print('env step')
                 rgbs.append(rgb)
-                action, texts_embeddings = model.inference(torch.stack(list(rgbs)), [instruction], torch.stack(list(inst_buffer)), device)
+                out, texts_embeddings = model.inference(torch.stack(list(rgbs)), [instruction], torch.stack(list(inst_buffer)), device)
+                # import pdb; pdb.set_trace()
+                action = action_tokenizer.discrete2Scalar(out)
                 inst_buffer.append(texts_embeddings.squeeze(0))
                 env_obs, reward, terminal, info = env.step(action)
                 ep_steps += 1
                 instruction = nlp_inst_decoder(env_obs['instruction'])
-                rgb = frame_resize(env_obs['rgb'], fp16, device)
+                rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
                 ep_reward += reward
                 videos.append(env.render()[:,:,::-1])
                 if terminal or ep_steps >= args.eval_timeout:
@@ -149,11 +161,11 @@ def eval_in_env(args, model, video_path, rank, iteration):
                     save_video(videos, video_path, rank, ep_reward, eval_eps)
                     ep_steps = 0
                     ep_reward = 0
-                    rgbs = deque(rgbs_tmp, maxlen=6)
-                    inst_buffer = deque(inst_tmp, maxlen=5)
+                    rgbs = deque(rgbs_tmp, maxlen=args.seq_len)
+                    inst_buffer = deque(inst_tmp, maxlen=args.seq_len - 1)
                     env_obs = env.reset()
                     instruction = nlp_inst_decoder(env_obs['instruction'])
-                    rgb = frame_resize(env_obs['rgb'], fp16, device)
+                    rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
                     videos = []
                     videos.append(env.render()[:,:,::-1])
                     eval_eps += 1
