@@ -30,14 +30,16 @@ from rt_torch.utilizes.eval_env import eval_in_env
 from rt_torch.utilizes.train_configs import *
 from rt_torch.utilizes.training_functions import get_batch
 # from rt_torch.utilizes.loggings import log_init
-
+import ssl
+ 
+ssl._create_default_https_context = ssl._create_unverified_context
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1."
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--device', default="cuda", type=str)
 parser.add_argument('--device_idx', default="0", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
-parser.add_argument('--batch_size', default=96, type=int, help='batch size')
+parser.add_argument('--batch_size', default=180, type=int, help='batch size')
 parser.add_argument('--loader_bs', default=1, type=int, help='')
 parser.add_argument('--loader_shuffle', default=True, type=bool, help="")
 parser.add_argument('--loader_worker', default=16, type=int, help='')

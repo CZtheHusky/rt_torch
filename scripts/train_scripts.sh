@@ -22,6 +22,14 @@ python /home/cz/bs/rt_torch/train.py --alias fusion-single --device_idx 5 --mode
 python /home/cz/bs/rt_torch/train.py --alias fusion-single --device_idx 5 --model fusion --scheduler cosine --lr 1e-5 --min_lr 1e-6 --heads 4 --model_dim 256
 
 
-python /home/cz/bs/rt_torch/train.py --alias vanilla-use --device_idx 7 --model vanilla --scheduler cosine --lr 1e-5 --min_lr 1e-6 --text_encoder "use"
+python /home/cz/bs/rt_torch/train.py --alias vanilla-use --device_idx 7 --model vanilla --scheduler cosine --lr 1e-5 --min_lr 1e-6 --text_encoder "use" --batch_size 160
 
-python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 5 --model fusion --scheduler cosine --lr 1e-5 --min_lr 1e-6 --heads 4 --model_dim 256 --text_encoder "use"
+python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 6 --model fusion --scheduler cosine --lr 1e-5 --min_lr 1e-6 --heads 4 --model_dim 256 --text_encoder "use"
+
+python /home/cz/bs/rt_torch/train.py --alias vanilla-use --device_idx 5 --model vanilla --scheduler cosine --lr 1e-4 --min_lr 1e-5 --text_encoder "use" --batch_size 160
+
+python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 4 --model fusion --scheduler cosine --lr 1e-4 --min_lr 1e-5 --heads 4 --model_dim 256 --text_encoder "use"
+
+python /home/cz/bs/rt_torch/train.py --alias vanilla-use --device_idx 3 --model vanilla --scheduler cosine --lr 1e-3 --min_lr 1e-4 --text_encoder "use" --batch_size 160
+
+python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 2 --model fusion --scheduler cosine --lr 1e-3 --min_lr 1e-4 --heads 4 --model_dim 256 --text_encoder "use"

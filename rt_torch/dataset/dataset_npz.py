@@ -29,7 +29,7 @@ text_encoder_path = {"use":"/inst_embedding_use",
                   "use_tf": "/inst_embedding_use_tf"}
 
 def build_language_table_ds(args, split=0.9, dumb=False):
-    batch_size = args.batch_size
+    batch_size = args.batch_size // args.loader_bs
     seq_len = args.seq_len
     sub_data = args.sub_data
     text_encoder = args.text_encoder
@@ -190,7 +190,7 @@ class language_table_dataset_npz(Dataset):
         # import pdb; pdb.set_trace()
         # padding_detail = "padding: "
         if ep_start_idx < self.seq_len - 1:
-            rgbs[0] = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, 3, 300, 300), rgbs[0]])
+            rgbs[0] = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, *rgbs[0].shape[1:]), rgbs[0]])
             insts = torch.cat([torch.zeros(self.seq_len - ep_start_idx - 1, self.text_embed_dim), insts])
             # padding_detail += f"length {self.seq_len - ep_start_idx}\n"
         else:

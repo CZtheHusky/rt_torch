@@ -69,6 +69,7 @@ def main(args):
             return_last=True,
             d_model=model_dim,
         )
+    text_embed_dim = model.text_embed_dim
     optimizer = get_optimizer(args, model)
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     log_path = args.log_path
@@ -118,7 +119,7 @@ def main(args):
     rank = model_engine.global_rank
     # logger, handler = log_init(args, rank)
     # print_with_rank(f"building dataset with seed: {rank}")
-    train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size // loader_bs, seq_len=seq_len, seed=args.seed, dumb=False, sub_data="language_table_sim")
+    train_set, test_set = build_language_table_ds(args, split=0.9, dumb=False)
     train_loader, test_loader = build_distributed_dataloader(args, train_set, test_set, world_size, rank)
     if rank == 0:
         print(args)
@@ -147,7 +148,8 @@ def main(args):
     while iteration < args.train_iters:
         args.iteration = iteration
         if args.test_interval and iteration % args.test_interval == 0 or iteration == args.train_iters:
-            local_eval_results = eval_in_env(args, model_engine, log_path, rank, iteration)
+            local_eval_results = eval_in_env(args, model, log_path, rank, iteration, text_embed_dim, train_set.action_tokenizer)
+            # local_eval_results = eval_in_env(args, model_engine, log_path, rank, iteration)
             local_test_loss = cal_test_loss(
                 args,
                 model_engine,
