@@ -14,7 +14,7 @@ def get_parser_for_basic_args():
     parser.add_argument('--batch_size', default=96, type=int, help='batch size')
     parser.add_argument('--loader_bs', default=8, type=int, help='')
     parser.add_argument('--loader_shuffle', action='store_true', help="load the args")
-    parser.add_argument('--loader_worker', default=32, type=int, help='')
+    parser.add_argument('--loader_worker', default=16, type=int, help='')
     parser.add_argument('--test-iters', default=100, type=int, help='test_interval')
     parser.add_argument('--test-interval', default=5000, type=int, help='test_interval')
     parser.add_argument('--seed', default=100, type=int, help='')
@@ -31,6 +31,7 @@ def get_parser_for_basic_args():
     parser.add_argument("--eval-timeout", default=300, type=int)
     parser.add_argument('--load_args', action='store_true', help="load the args")
     parser.add_argument('--model', default="vanilla", type=str, help="")
+    parser.add_argument('--quantile', default=True, type=str2bool, help="")
 
 
     parser.add_argument("--load-dir", type=str, help="Path of checkpoint to load.")

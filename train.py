@@ -42,7 +42,8 @@ parser.add_argument('--text_encoder', default="t5", type=str)
 parser.add_argument('--batch_size', default=180, type=int, help='batch size')
 parser.add_argument('--loader_bs', default=1, type=int, help='')
 parser.add_argument('--loader_shuffle', default=True, type=bool, help="")
-parser.add_argument('--loader_worker', default=16, type=int, help='')
+parser.add_argument('--quantile', default=True, type=bool, help="")
+parser.add_argument('--loader_worker', default=32, type=int, help='')
 parser.add_argument('--train-iters', default=500000, type=int, help='train_iters')
 parser.add_argument('--test-iters', default=100, type=int, help='test_iter')
 parser.add_argument('--iteration', default=0, type=int, help='iteration')
@@ -53,7 +54,7 @@ parser.add_argument('--save-interval', default=2500, type=int)
 parser.add_argument('--alias', default="", type=str, help="alias of the experiment")
 parser.add_argument('--sub_data', default="language_table_sim", type=str, help="data for training")
 parser.add_argument('--max_save_num', default=5, type=int)
-parser.add_argument('--depth', default=2, type=int)
+parser.add_argument('--depth', default=8, type=int)
 parser.add_argument('--heads', default=8, type=int)
 parser.add_argument('--key_dim', default=512, type=int)
 parser.add_argument('--model_dim', default=512, type=int)
@@ -197,8 +198,8 @@ def main(args):
     print('device: ', device)
     
     train_set, test_set = build_language_table_ds(args, split=0.9, dumb=False)
-    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, shuffle=loader_shuffle)
-    test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, shuffle=loader_shuffle)
+    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
+    test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
     if args.text_encoder == "use_tf":
         import tensorflow as tf
         gpus = tf.config.list_physical_devices('GPU')
@@ -251,14 +252,14 @@ def main(args):
         state_dict = torch.load(newest_model)
         model.load_state_dict(state_dict['model_state_dict'])
         if state_dict.get("iteration") is None:
-            iteration = state_dict.get("loss_step")
+            args.iteration = state_dict.get("loss_step")
         else:
-            iteration = state_dict.get('iteration', 0)
+            args.iteration = state_dict.get('iteration', 0)
         optimizer.load_state_dict(state_dict['optimizer_state_dict'])
         if scheduler is not None:
             lr_scheduler.load_state_dict(state_dict['scheduler'])
     else:
-        iteration = 0
+        args.iteration = 0
     logger.info(f"\nTotal:")
     getModelSize(model, logger)
     logger.info(f"\nfilm_efficientnet_b3:")
@@ -284,6 +285,7 @@ def main(args):
     test_data_iterator = iter(cyclic_iter(test_loader))
     iteration = args.iteration
     pbar = tqdm(range(args.train_iters))
+    pbar.update(iteration)
     while iteration < train_iters:
         args.iteration = iteration
         if test_interval != 0 and iteration % test_interval == 0:
@@ -356,15 +358,16 @@ if __name__ == "__main__":
     else:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device_idx
     # print(os.environ)
-    # if args.load_path is not None:
-    #     load_path = args.load_path
-    #     if args.load_args:
-    #         # Load the arguments from a file
-    #         with open(os.path.join(args.load_path, 'args.json'), 'r') as f:
-    #             args_dict = json.load(f)
-    #         args_dict["load_path"] = load_path
-    #         args_dict["load_args"] = args.load_args
-    #         # Create a new Namespace object from the saved arguments
-    #         print("loading args")
-    #         args = argparse.Namespace(**args_dict)
+    if args.load_path is not None:
+        load_path = args.load_path
+        if args.load_args:
+            # Load the arguments from a file
+            with open(os.path.join(args.load_path, 'args.json'), 'r') as f:
+                args_dict = json.load(f)
+            args_dict["load_path"] = load_path
+            args_dict["load_args"] = args.load_args
+            # Create a new Namespace object from the saved arguments
+            print("loading args")
+            args = argparse.Namespace(**args_dict)
+    print(args)
     main(args)

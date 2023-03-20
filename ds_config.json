@@ -1,7 +1,7 @@
 {
-    "train_batch_size" : 2400,
-    "train_micro_batch_size_per_gpu": 200,
-    "gradient_accumulation_steps": 4,
+    "train_batch_size" : 4200,
+    "train_micro_batch_size_per_gpu": 350,
+    "gradient_accumulation_steps": 2,
 
     "fp16": {
         "enabled": True,
@@ -11,9 +11,8 @@
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
-        "output_path": /home/cz/bs/rt_torch/history/0317-005916-use_tf-1e-5-1-1-0-256-deepspeed-fusion
+        "output_path": /home/cz/bs/rt_torch/history/0320-155911-use-1e-4-1-1-0-256-deepspeed-fusion
     },
-    "gradient_clipping": 40,
 
     "wall_clock_breakdown" : true,
     "checkpointing": {

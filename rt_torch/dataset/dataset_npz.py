@@ -48,7 +48,7 @@ def build_language_table_ds(args, split=0.9, dumb=False):
         rgb_path = obs_path + "/rgbs"
         rew_path = v + "/rewards"
         traj_len_path = v + "/traj_len.npz"
-        quantile_path = v + "/action_quantiles.npy"
+        quantile_path = v + "/all_actions.npy"
         try:
             traj_len = np.load(traj_len_path)['arr_0']
             if os.path.exists(inst_embed_path):
@@ -69,7 +69,7 @@ def build_language_table_ds(args, split=0.9, dumb=False):
                 },
                 "num_ep": size,
                 "current_idx": 0,
-                "quantile_path": quantile_path,
+                "action_path": quantile_path,
             }
         except Exception as e:
             pass
@@ -136,7 +136,7 @@ class language_table_dataset_npz(Dataset):
         self.dumb = dumb
         self.dumb_tmp = None
         self.text_embed_dim = 768 if text_encoder == "t5" else 512
-        self.action_tokenizer = ActionTokenizer(num_action_bin=args.vocab_size, quantile_path=self.ds_stats[args.sub_data]["quantile_path"])
+        self.action_tokenizer = ActionTokenizer(num_action_bin=args.vocab_size, action_path=self.ds_stats[args.sub_data]["action_path"], quantile=args.quantile)
         for k, v in self.indices_index.items():
             self.len += len(v[mode])
             self.bucket.append(self.len)
@@ -214,7 +214,7 @@ class language_table_dataset_npz(Dataset):
         for idx, vid in enumerate(rgbs):
             split_idx[idx] = len(vid)
         rgbs = torch.cat(rgbs)
-        acts = self.action_tokenizer.discretize(acts).view(-1)
+        acts = self.action_tokenizer.discretize(acts)
         # import pdb; pdb.set_trace()
         return rgbs, insts, acts, split_idx
             

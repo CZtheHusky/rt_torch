@@ -66,7 +66,6 @@ def main(args):
             text_model_device='cpu',
             token_learner=False,
             dropout=0.1,
-            return_last=True,
             d_model=model_dim,
         )
     text_embed_dim = model.text_embed_dim

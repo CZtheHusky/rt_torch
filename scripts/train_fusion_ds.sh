@@ -19,15 +19,15 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=2400
-MICRO_BATCH=200
+GLOBAL_BATCH=4200
+MICRO_BATCH=350
 
 cur_data="`date +%m%d`"
 cur_time="`date +%H%M%S`"
-lr=1e-5
+lr=1e-4
 lr_t=1
 lr_eff=1
-min_lr=1e-6
+min_lr=1e-5
 heads=4
 depth=0
 model_dim=256
@@ -37,7 +37,7 @@ fp16="True"
 # host="localhost:4,5,6"
 host="localhost:0,1,2,3,4,5"
 alias="deepspeed-$model_type"
-text_encoder="use_tf"
+text_encoder="use"
 exp_name="/home/cz/bs/rt_torch/history/$cur_data-$cur_time-$text_encoder-$lr-$lr_t-$lr_eff-$depth-$model_dim-$alias"
     
 
@@ -45,7 +45,7 @@ cat <<EOT > $DS_CONFIG
 {
     "train_batch_size" : $GLOBAL_BATCH,
     "train_micro_batch_size_per_gpu": $MICRO_BATCH,
-    "gradient_accumulation_steps": 4,
+    "gradient_accumulation_steps": 2,
 
     "fp16": {
         "enabled": True,
@@ -57,7 +57,6 @@ cat <<EOT > $DS_CONFIG
         "job_name": "train",
         "output_path": $exp_name
     },
-    "gradient_clipping": 40,
 
     "wall_clock_breakdown" : true,
     "checkpointing": {
@@ -95,9 +94,11 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --fp16 $fp16 \
+    --text_encoder $text_encoder \
     --batch_size $MICRO_BATCH \
     --loader_bs 1 \
     --eval-eps 10 \
+    --sub_data "language_table_sim" \
     --eval-timeout 100 \
     --alias $alias \
     --model $model_type \

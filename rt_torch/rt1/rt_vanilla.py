@@ -31,7 +31,6 @@ class RT1_transformer(nn.Module):
             quantile_path=None,
     ):
         super().__init__()
-        self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, quantile_path=quantile_path)
         self.text_tokenizer = TextTokenizer(name=text_encoder,
                                             device=text_model_device)
         self.text_embed_dim = self.text_tokenizer.text_embed_dim
@@ -56,7 +55,6 @@ class RT1_transformer(nn.Module):
         self.return_last = return_last
         self.seq_len = seq_len
         self.memory_buffer = None
-        self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, action_max=0.1, action_min=-0.1)
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
 
@@ -110,8 +108,8 @@ class RT1_transformer(nn.Module):
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
         if not self.return_last:
             logits = logits[:, -1]
-        # logits = logits.permute(0, 2, 1)
-        logits = logits.view(-1, logits.shape[-1])
+        logits = logits.permute(0, 2, 1)
+        # logits = logits.view(-1, logits.shape[-1])
         # actions_discretes = self.action_tokenizer.discretize(actions)
         # actions_discretes = actions_discretes.view(-1)
         # print(f"rank: {get_rank()}, inference: logits: {logits.shape}, actions_discretes: {actions_discretes.shape}")

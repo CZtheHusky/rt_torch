@@ -36,7 +36,7 @@ from PIL import Image
 def frame_preprocess(transorm, img, fp16, device):
     img = transorm(Image.fromarray(img))
     if fp16:
-        img = img.astype(torch.half)
+        img = torch.tensor(img, dtype=torch.half)
     img = img.to(device)
     return img
 
