@@ -69,32 +69,20 @@ def main(args):
             d_model=model_dim,
         )
     text_embed_dim = model.text_embed_dim
-    optimizer = get_optimizer(args, model)
-    opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
+    # optimizer = get_optimizer(args, model)
+    # opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     log_path = args.log_path
     os.makedirs(log_path, exist_ok=True)
     with open(os.path.join(log_path, 'args.json'), 'w') as f:
         json.dump(args.__dict__, f)
+    print_rank_0(" ============= DS_INIT ==============")
     deepspeed.init_distributed(distributed_port=args.deepspeed_port)
-    # mpu.initialize_model_parallel()
-    # if mpu.get_data_parallel_rank() == 0:
-    #     print(
-    #         " > number of parameters on (tensor, pipeline) "
-    #         "model parallel rank ({}, {}): {}".format(
-    #             mpu.get_tensor_model_parallel_rank(),
-    #             mpu.get_pipeline_model_parallel_rank(),
-    #             sum([p.nelement() for p in model.parameters()]),
-    #         ),
-    #         flush=True,
-    #     )
-    # print_rank_0(" ============= MPU_INIT ==============")
     model_engine, _, _, _ = deepspeed.initialize(
         args,
         model,
-        model_parameters=model.parameters(),
         # mpu=mpu,
-        optimizer=optimizer,
-        lr_scheduler=opt_param_scheduler,
+        # optimizer=optimizer,
+        # lr_scheduler=opt_param_scheduler,
     )
     print_rank_0(" ============= DS_INIT ==============")
     if args.fp16:
@@ -116,8 +104,6 @@ def main(args):
     model_engine.text_tokenizer.text_model.model = model_engine.text_tokenizer.text_model.model.to(args.device)
     world_size = dist.get_world_size()
     rank = model_engine.global_rank
-    # logger, handler = log_init(args, rank)
-    # print_with_rank(f"building dataset with seed: {rank}")
     train_set, test_set = build_language_table_ds(args, split=0.9, dumb=False)
     train_loader, test_loader = build_distributed_dataloader(args, train_set, test_set, world_size, rank)
     if rank == 0:
@@ -212,21 +198,9 @@ def main(args):
             model_engine.monitor.write_events(summary_events)
         iteration += 1
         if rank == 0:
-            # loss = sum(losses) / len(losses)
-            # writer.add_scalar('Train Loss', float(loss), iteration)
-            # logger.info(f"Iteration: {model_engine.global_samples}, Train Loss: {loss:.5f}")
-            # current_lr = opt_param_scheduler.get_lr()
-            # writer.add_scalar('Learning Rate', float(current_lr), iteration)
-            # writer.flush()
             pbar.update(1)
         if args.save_interval and iteration % args.save_interval == 0 or iteration == args.train_iters:
-            # print_with_rank(f"saving ckpt: {log_path}, iteration: {iteration}")
             save_checkpoint(args, log_path, iteration, model_engine)
-            # print_with_rank(f"saving ckpt done, path: {log_path}, iteration: {iteration}")
-    # if rank == 0:
-        # writer.close()
-        # logger.removeHandler(handler)
-        # logging.shutdown()
 
 
 if __name__ == "__main__":

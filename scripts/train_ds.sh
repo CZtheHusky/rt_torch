@@ -45,19 +45,31 @@ cat <<EOT > $DS_CONFIG
 {
     "train_batch_size" : $GLOBAL_BATCH,
     "train_micro_batch_size_per_gpu": $MICRO_BATCH,
-    "gradient_accumulation_steps": 4,
-
+    "gradient_accumulation_steps": 1,
+    "optimizer": {
+        "type": "Adam",
+        "params": {
+            "lr": 1e-4,
+            "betas": [0.9, 0.999],
+            "eps": 1e-8
+        }
+    },
     "fp16": {
         "enabled": True,
         "initial_scale_power": 12
     },
-
+    "scheduler": {
+        "type": "CosineAnnealingLR",
+        "params": {
+            "eta_min": 1e-5,
+            "T_max": $train_iters,
+        }
+    }
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
         "output_path": $exp_name
     },
-    "gradient_clipping": 40,
 
     "wall_clock_breakdown" : true,
     "checkpointing": {

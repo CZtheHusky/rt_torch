@@ -19,8 +19,8 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=4200
-MICRO_BATCH=350
+GLOBAL_BATCH=180
+MICRO_BATCH=180
 
 cur_data="`date +%m%d`"
 cur_time="`date +%H%M%S`"
@@ -32,10 +32,10 @@ heads=4
 depth=0
 model_dim=256
 model_type="fusion"
-fp16="True"
+fp16="False"
 # host="localhost:1,2,3"
 # host="localhost:4,5,6"
-host="localhost:0,1,2,3,4,5"
+host="localhost:0,1,2,3,4,5,6,7"
 alias="deepspeed-$model_type"
 text_encoder="use"
 exp_name="/home/cz/bs/rt_torch/history/$cur_data-$cur_time-$text_encoder-$lr-$lr_t-$lr_eff-$depth-$model_dim-$alias"
@@ -45,13 +45,26 @@ cat <<EOT > $DS_CONFIG
 {
     "train_batch_size" : $GLOBAL_BATCH,
     "train_micro_batch_size_per_gpu": $MICRO_BATCH,
-    "gradient_accumulation_steps": 2,
-
+    "gradient_accumulation_steps": 1,
+    "optimizer": {
+        "type": "Adam",
+        "params": {
+            "lr": 1e-4,
+            "betas": [0.9, 0.999],
+            "eps": 1e-8
+        }
+    },
     "fp16": {
         "enabled": True,
         "initial_scale_power": 12
     },
-
+    "scheduler": {
+        "type": "CosineAnnealingLR",
+        "params": {
+            "eta_min": 1e-5,
+            "T_max": $train_iters,
+        }
+    }
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
