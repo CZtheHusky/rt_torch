@@ -75,7 +75,6 @@ def main(args):
     os.makedirs(log_path, exist_ok=True)
     with open(os.path.join(log_path, 'args.json'), 'w') as f:
         json.dump(args.__dict__, f)
-    print_rank_0(" ============= DS_INIT ==============")
     deepspeed.init_distributed(distributed_port=args.deepspeed_port)
     model_engine, _, _, _ = deepspeed.initialize(
         args,
@@ -101,6 +100,7 @@ def main(args):
             )
         )
     args.device = model_engine.device
+    print(f" ============= device: {args.device} ==============")
     model_engine.text_tokenizer.text_model.model = model_engine.text_tokenizer.text_model.model.to(args.device)
     world_size = dist.get_world_size()
     rank = model_engine.global_rank

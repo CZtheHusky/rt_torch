@@ -19,52 +19,52 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=5120
-MICRO_BATCH=320
-train_iters=500000
+GLOBAL_BATCH=2320
+MICRO_BATCH=290
+
+train_iters=1000000
 cur_data="`date +%m%d`"
 cur_time="`date +%H%M%S`"
 lr=1e-4
 lr_t=1
 lr_eff=1
 min_lr=1e-5
-heads=4
-depth=0
-model_dim=256
-model_type="fusion"
+heads=8
+depth=8
+model_dim=512
+model_type="vanilla"
 fp16="True"
-# host="localhost:1,2,3"
-# host="localhost:4,5,6"
 host="localhost:0,1,2,3,4,5,6,7"
 alias="deepspeed-$model_type"
 text_encoder="use"
 exp_name="/home/cz/bs/rt_torch/history/$cur_data-$cur_time-$text_encoder-$lr-$lr_t-$lr_eff-$depth-$model_dim-$alias"
     
+    # "scheduler": {
+    #     "type": "CosineAnnealingLR",
+    #     "params": {
+    #         "eta_min": 1e-5,
+    #         "T_max": $train_iters,
+    #     }
+    # }
 
 cat <<EOT > $DS_CONFIG
 {
     "train_batch_size" : $GLOBAL_BATCH,
     "train_micro_batch_size_per_gpu": $MICRO_BATCH,
-    "gradient_accumulation_steps": 2,
+    "gradient_accumulation_steps": 1,
     "optimizer": {
-        "type": "Adam",
+        "type": "AdamW",
         "params": {
             "lr": 1e-4,
             "betas": [0.9, 0.999],
-            "eps": 1e-8
+            "eps": 1e-8,
+            "weight_decay": 1e-4
         }
     },
     "fp16": {
         "enabled": True,
         "initial_scale_power": 12
     },
-    "scheduler": {
-        "type": "CosineAnnealingLR",
-        "params": {
-            "eta_min": 1e-5,
-            "T_max": $train_iters,
-        }
-    }
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
@@ -92,6 +92,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --global-batch-size $GLOBAL_BATCH \
     --log-path $exp_name \
     --train-iters $train_iters \
+    --text_encoder $text_encoder \
     --test-iters 100 \
     --test-interval 2500 \
     --save-interval 2500 \
@@ -107,12 +108,11 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --adam-beta1 0.9 \
     --adam-beta2 0.95 \
     --fp16 $fp16 \
-    --text_encoder $text_encoder \
     --batch_size $MICRO_BATCH \
     --loader_bs 1 \
-    --eval-eps 5 \
-    --sub_data "language_table_sim" \
+    --eval-eps 10 \
     --eval-timeout 100 \
+    --sub_data "language_table_sim" \
     --alias $alias \
     --model $model_type \
     $ds_args

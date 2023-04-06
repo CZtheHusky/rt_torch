@@ -34,7 +34,7 @@ from PIL import Image
 
 
 def frame_preprocess(transorm, img, fp16, device):
-    img = transorm(Image.fromarray(img))
+    img = transorm(Image.fromarray(img)).detach()
     if fp16:
         img = torch.tensor(img, dtype=torch.half)
     img = img.to(device)
@@ -118,10 +118,10 @@ def eval_in_env(args, model, video_path, rank, iteration, text_embed_dim, action
                     instruction = nlp_inst_decoder(env_obs['instruction'])
                     rgb = transform(env_obs['rgb'])
                     videos = []
-                    if ep_steps == 100:
-                        print(f"ep {eval_eps} timeout")
-                    else:
-                        print(f"ep {eval_eps} done")
+                    # if ep_steps == 100:
+                    #     print(f"ep {eval_eps} timeout")
+                    # else:
+                    #     print(f"ep {eval_eps} done")
                     ep_steps = 0
                     eval_eps += 1
         else:
@@ -156,6 +156,7 @@ def eval_in_env(args, model, video_path, rank, iteration, text_embed_dim, action
                     # if ep_steps >= args.eval_timeout:
                     #     rewards.append(0)
                     # else:
+                    # print(f"==========rank {rank} episode done==========")
                     ep_length.append(ep_steps)
                     rewards.append(ep_reward)
                     save_video(videos, video_path, rank, ep_reward, eval_eps)

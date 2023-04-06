@@ -76,10 +76,9 @@ def main(dataset_name):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    
-    text_encoder = UniversalSentenceEncoder(device="cuda")
+    text_encoder = UniversalSentenceEncoder(device="cpu")
     dataset_path = dataset_paths[dataset_name]
-    np_path = dataset_path + "_npz"
+    np_path = dataset_path + "_test"
     obs_path = np_path + "/observations"
     print("np_path: ", np_path)
     print("obs_path: ", obs_path)
@@ -117,21 +116,9 @@ def main(dataset_name):
         for step in episode:
             ep_step_num += 1
             paths["action"][1].append(step["action"])
-            # paths["is_first"][1].append(step["is_first"])
-            # paths["is_last"][1].append(step["is_last"])
-            # paths["is_terminal"][1].append(step["is_terminal"])
-            # print(step["observation"]["rgb"].shape)
-            # resized_rgb = cv.resize(step["observation"]["rgb"], (300, 168))
-            # print(resized_rgb.shape)
-            # resized_rgb = np.pad(resized_rgb, ((66, 66), (0, 0), (0, 0))).transpose((2, 0, 1))
-            # print(resized_rgb.shape)
-            # print(resized_rgb.shape)
-            # import pdb; pdb.set_trace()
             frame = transform(Image.fromarray(step["observation"]["rgb"]))
             paths["rgb"][1].append(frame.numpy())
             paths["instruction"][1].append(nlp_inst_decoder(step["observation"]["instruction"]))
-            # paths["effector_target_translation"][1].append(step["observation"]["effector_target_translation"])
-            # paths["effector_translation"][1].append(step["observation"]["effector_translation"])
             paths["reward"][1].append(step["reward"])
         # import pdb; pdb.set_trace()
         traj_len[1].append(ep_step_num)
@@ -141,7 +128,6 @@ def main(dataset_name):
         actions.append(ep_act_array)
         for value in paths.values():
             np.savez_compressed(os.path.join(value[0], str(ep_idx) + '.npz'), value[1])
-            # np.save(os.path.join(value[0], str(ep_idx) + '.npy'), value[1])
     np.savez_compressed(traj_len[0], np.array(traj_len[1]))
     quantileBinning(actions, np_path)
 
@@ -149,7 +135,7 @@ def main(dataset_name):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
     import tensorflow as tf
     gpus = tf.config.list_physical_devices('GPU')
     for gpu in gpus:

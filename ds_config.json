@@ -1,7 +1,7 @@
 {
-    "train_batch_size" : 180,
-    "train_micro_batch_size_per_gpu": 180,
-    "gradient_accumulation_steps": 1,
+    "train_batch_size" : 5120,
+    "train_micro_batch_size_per_gpu": 320,
+    "gradient_accumulation_steps": 2,
     "optimizer": {
         "type": "Adam",
         "params": {
@@ -9,6 +9,10 @@
             "betas": [0.9, 0.999],
             "eps": 1e-8
         }
+    },
+    "fp16": {
+        "enabled": True,
+        "initial_scale_power": 12
     },
     "scheduler": {
         "type": "CosineAnnealingLR",
@@ -20,7 +24,7 @@
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
-        "output_path": /home/cz/bs/rt_torch/history/0321-173805-use-1e-4-1-1-0-256-deepspeed-fusion
+        "output_path": /home/cz/bs/rt_torch/history/0405-124612-use-1e-4-1-1-0-256-deepspeed-fusion
     },
 
     "wall_clock_breakdown" : true,
