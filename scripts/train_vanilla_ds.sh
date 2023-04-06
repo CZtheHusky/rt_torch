@@ -19,10 +19,10 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=2320
-MICRO_BATCH=290
+GLOBAL_BATCH=512
+MICRO_BATCH=64
 
-train_iters=1000000
+train_iters=500000
 cur_data="`date +%m%d`"
 cur_time="`date +%H%M%S`"
 lr=1e-4
@@ -65,6 +65,13 @@ cat <<EOT > $DS_CONFIG
         "enabled": True,
         "initial_scale_power": 12
     },
+    "scheduler": {
+        "type": "CosineAnnealingLR",
+        "params": {
+            "eta_min": 1e-5,
+            "T_max": $train_iters,
+        }
+    }
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
@@ -89,7 +96,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --log-path $exp_name \
     --train-iters $train_iters \
     --text_encoder $text_encoder \
-    --test-iters 100 \
+    --test-iters 1 \
     --test-interval 2500 \
     --save-interval 2500 \
     --seed 42 \
@@ -105,8 +112,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --adam-beta2 0.95 \
     --fp16 $fp16 \
     --batch_size $MICRO_BATCH \
-    --loader_bs 1 \
-    --eval-eps 10 \
+    --eval-eps 1 \
     --eval-timeout 100 \
     --sub_data "language_table_sim" \
     --alias $alias \

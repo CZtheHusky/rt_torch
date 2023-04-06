@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader
 def build_distributed_dataloader(args, train_set, test_set, world_size, rank):
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set, world_size, rank, seed=args.seed)
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_set, world_size, rank, seed=args.seed)
-    train_loader = DataLoader(dataset=train_set, batch_size=args.loader_bs, num_workers=args.loader_worker, shuffle=False, sampler=train_sampler)
-    test_loader = DataLoader(dataset=test_set, batch_size=args.loader_bs, num_workers=args.loader_worker, shuffle=False, sampler=test_sampler)
+    train_loader = DataLoader(dataset=train_set, batch_size=args.batch_size, num_workers=args.loader_worker, shuffle=False, sampler=train_sampler)
+    test_loader = DataLoader(dataset=test_set, batch_size=args.batch_size, num_workers=args.loader_worker, shuffle=False, sampler=test_sampler)
     return train_loader, test_loader
 
 def save_checkpoint(args, save_path, iteration, model_engine: deepspeed.DeepSpeedEngine):
@@ -29,27 +29,14 @@ def train_step(args, model, data_iterator):
 def get_batch(args, data_iterator):
     data = next(data_iterator)
     device = args.device
-    rgbs, instructions, actions, split_idx = data
+    rgbs, instructions, actions = data
     if args.fp16:
         rgbs = rgbs.to(dtype=torch.half)
         instructions = instructions.to(dtype=torch.half)
-    if len(instructions.shape) == 3:
-        # print_rank_0(rgbs.shape)
-        # print_rank_0(instructions.shape)
-        # print_rank_0(actions.shape)
-        # print_rank_0(split_idx.shape)
-        rgbs = rgbs.view(-1, *rgbs.shape[2:])
-        instructions = instructions.view(-1, *instructions.shape[2:])
-        actions = actions.view(-1, *actions.shape[2:])
-        split_idx = split_idx.view(-1, *split_idx.shape[2:])
-        # print_rank_0(rgbs.shape)
-        # print_rank_0(instructions.shape)
-        # print_rank_0(actions.shape)
-        # print_rank_0(split_idx.shape)
     rgbs = rgbs.to(device)
     actions = actions.to(device)
     instructions = instructions.to(device)
-    return [rgbs, instructions, actions, split_idx]
+    return [rgbs, instructions, actions]
 
 
 def forward_and_backward_step(
@@ -90,5 +77,6 @@ def cal_test_loss(
             # loss_list = [l.cpu().item() for l in loss_list]
             total_loss = total_loss + np.mean(loss_list)
         # XXX: be careful with this when use parallel
-        total_loss /= args.test_iters
+        if args.test_iters != 0:
+            total_loss /= args.test_iters
     return total_loss

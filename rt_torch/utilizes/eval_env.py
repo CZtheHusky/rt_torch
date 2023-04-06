@@ -36,7 +36,7 @@ from PIL import Image
 def frame_preprocess(transorm, img, fp16, device):
     img = transorm(Image.fromarray(img)).detach()
     if fp16:
-        img = torch.tensor(img, dtype=torch.half)
+        img = img.to(dtype=torch.half)
     img = img.to(device)
     return img
 
@@ -177,7 +177,10 @@ def eval_in_env(args, model, video_path, rank, iteration, text_embed_dim, action
                 num = len(video_dirs) - 10
                 for i in range(num):
                     shutil.rmtree(os.path.join(root_path, video_dirs[i]))
-        return np.array([np.array(rewards).mean(), np.array(ep_length).mean()])
+        if args.eval_eps != 0 :
+            return np.array([np.array(rewards).mean(), np.array(ep_length).mean()])
+        else:
+            return np.array([0., 0.])
 
 
 

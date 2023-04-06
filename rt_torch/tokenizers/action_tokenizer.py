@@ -41,10 +41,9 @@ class ActionTokenizer:
             x = ((x - self.min) / (self.max - self.min) * (self.num_action_bin - 1)).int().type(torch.int64).long() # x < num_action_bin
         else:
             indices = []
-            x = x.transpose(1, 0).contiguous()
             for i in range(self.act_dim):
                 indices.append(torch.bucketize(x[i], self.bucket[i]))
-            x = torch.stack(indices, dim=1)
+            x = torch.tensor(indices)
         return x
 
     def discrete2Scalar(self, x):

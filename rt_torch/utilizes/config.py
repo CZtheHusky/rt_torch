@@ -12,7 +12,6 @@ def get_parser_for_basic_args():
     parser.add_argument('--device', default="cuda", type=str)
     parser.add_argument('--text_encoder', default="t5", type=str)
     parser.add_argument('--batch_size', default=96, type=int, help='batch size')
-    parser.add_argument('--loader_bs', default=8, type=int, help='')
     parser.add_argument('--loader_shuffle', action='store_true', help="load the args")
     parser.add_argument('--loader_worker', default=16, type=int, help='')
     parser.add_argument('--test-iters', default=100, type=int, help='test_interval')

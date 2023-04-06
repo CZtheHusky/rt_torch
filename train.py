@@ -14,7 +14,7 @@ from torchvision.models import EfficientNet_B3_Weights
 from tqdm import tqdm
 from rt_torch.rt1.rt_vanilla import RT1_transformer
 from rt_torch.rt1.rt_fusion import RT1_fusion
-from rt_torch.dataset.dataset_npz import build_language_table_ds
+from rt_torch.dataset.dataset_npy import build_language_table_ds
 from rt_torch.tokenizers.action_tokenizer import ActionTokenizer
 from collections import defaultdict
 from torch.utils.data import DataLoader
@@ -40,7 +40,6 @@ parser.add_argument('--device', default="cuda", type=str)
 parser.add_argument('--device_idx', default="0", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
 parser.add_argument('--batch_size', default=180, type=int, help='batch size')
-parser.add_argument('--loader_bs', default=1, type=int, help='')
 parser.add_argument('--loader_shuffle', default=True, type=bool, help="")
 parser.add_argument('--quantile', default=True, type=bool, help="")
 parser.add_argument('--loader_worker', default=32, type=int, help='')
@@ -192,14 +191,13 @@ def main(args):
     seq_len = args.seq_len
     token_learner_num = args.token_learner_num
     loader_shuffle = True if args.loader_shuffle else False
-    loader_bs = args.loader_bs
     loader_worker = args.loader_worker
 
     print('device: ', device)
     
     train_set, test_set = build_language_table_ds(args, split=0.9, dumb=False)
-    train_loader = DataLoader(dataset=train_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
-    test_loader = DataLoader(dataset=test_set, batch_size=loader_bs, num_workers=loader_worker, shuffle=loader_shuffle)
+    train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=loader_shuffle)
+    test_loader = DataLoader(dataset=test_set, batch_size=batch_size, shuffle=loader_shuffle)
     if args.text_encoder == "use_tf":
         import tensorflow as tf
         gpus = tf.config.list_physical_devices('GPU')
@@ -346,7 +344,8 @@ def test(args, model, test_data_iterator, logger, writer, iteration):
             loss = model.forward(data)
             num_step += 1
             test_loss += loss
-    test_loss /= args.test_iters
+    if args.test_iters != 0:
+        test_loss /= args.test_iters
     logger.info(f"Iteration: {iteration * args.batch_size}, Test_Loss: {test_loss:.5f}")
     writer.add_scalar('Train/Samples/test_loss', float(test_loss), iteration * args.batch_size)
     writer.add_scalar('Train/Samples/test_loss-iter', float(test_loss), iteration)

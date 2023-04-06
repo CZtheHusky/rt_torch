@@ -4,7 +4,7 @@ import shutil
 from rt_torch.rt1.rt_vanilla import RT1_transformer
 from rt_torch.rt1.rt_fusion import RT1_fusion
 # from rt_torch.rt1.rt_xl import RT1_transformerxl
-from rt_torch.dataset.dataset_npz import build_language_table_ds
+from rt_torch.dataset.dataset_npy import build_language_table_ds
 import logging
 import deepspeed
 from rt_torch import mpu
@@ -18,7 +18,6 @@ from rt_torch.utilizes.loggings import log_init
 import json
 
 def main(args):
-    batch_size = args.batch_size
     text_encoder = args.text_encoder
     depth = args.depth
     heads = args.heads
@@ -29,7 +28,6 @@ def main(args):
     seq_len = args.seq_len
     token_learner_num = args.token_learner_num
     args.loader_shuffle = True if args.loader_shuffle else False
-    loader_bs = args.loader_bs
     if args.text_encoder == "use_tf":
         import tensorflow as tf
         gpus = tf.config.list_physical_devices('GPU')

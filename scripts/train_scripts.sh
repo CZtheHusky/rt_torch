@@ -30,3 +30,5 @@ python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 6 --model f
 python /home/cz/bs/rt_torch/train.py --alias vanilla-use --device_idx 5 --model vanilla --scheduler cosine --lr 1e-4 --min_lr 1e-5 --text_encoder "use" --batch_size 150 --train-iters 1000000
 
 python /home/cz/bs/rt_torch/train.py --alias fusion-use --device_idx 4 --model fusion --scheduler cosine --lr 1e-4 --min_lr 1e-5 --heads 4 --model_dim 256 --text_encoder "use" --train-iters 1000000
+
+python /home/cz/bs/rt_torch/train.py --alias debug --device cpu --model fusion --scheduler cosine --lr 1e-4 --min_lr 1e-5 --heads 4 --model_dim 256 --text_encoder "use" --test-iters 1 --eval-eps 1

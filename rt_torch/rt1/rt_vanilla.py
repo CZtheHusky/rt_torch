@@ -58,49 +58,27 @@ class RT1_transformer(nn.Module):
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
 
-    def token_stack(self, tokens, split_idx):
-        start_idx = 0
-        stacked_list = []
-        for ep_idx in range(len(split_idx)):
-            idx = int(split_idx[ep_idx].item())
-            # print(idx)
-            # print(idx.dtype)
-            if idx == -1:
-                continue
-            current_split = tokens[start_idx:start_idx + idx]
-            if ep_idx > 0:
-                current_split = torch.cat([tokens[-self.seq_len + 1:], current_split])
-            start_idx += idx
-            stacked_tokens = torch.stack([current_split[i - self.seq_len:i] for i in range(self.seq_len, len(current_split) + 1)])
-            # import pdb; pdb.set_trace()
-            stacked_list.append(stacked_tokens)
-        return torch.cat(stacked_list)
-
     def forward(
             self,
             data,
     ):
-        frames, texts_embeddings, actions, split_idx = data
+        # bs sql c h w
+        # bs sql d
+        # bs d
+        frames, texts_embeddings, actions = data
+        batch_size = frames.shape[0]
         # rgb_size, embedding_size, action_size, split_idx_size = frames.shape, texts_embeddings.shape, actions.shape, split_idx.shape
         # print(f"rank: {get_rank()}, inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
         # print(f"inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
         device = frames.device
         # import pdb; pdb.set_trace()
-        frames = torch.cat([frames, torch.zeros([self.seq_len - 1, *frames.shape[1:]], dtype=frames.dtype).to(device)])
-        # import pdb; pdb.set_trace()
-        if not isinstance(texts_embeddings, list):
-            texts_embeddings = torch.cat([texts_embeddings, torch.zeros([self.seq_len - 1, *texts_embeddings.shape[1:]], dtype=texts_embeddings.dtype).to(device)])
-        else:
-            texts_embeddings.extend([""] * self.seq_len - 1)
-            texts_embeddings = self.text_tokenizer(texts_embeddings)
-        # import pdb; pdb.set_trace()
         # print(f"rank: {get_rank()}, inference, frames: {frames.shape}, texts_embeddings: {texts_embeddings.shape}")
+        frames = rearrange(frames, 'b l c h w -> (b l) c h w')
+        texts_embeddings = rearrange(texts_embeddings, 'b l d -> (b l) d')
         image_tokens = self.image_tokenizer(frames, texts_embeddings)
+        image_tokens = rearrange(image_tokens, '(b l) n d -> b (l n) d', b=batch_size)
         # print(f"rank: {get_rank()}, inference, image_tokens: {image_tokens.shape}")
         # import pdb; pdb.set_trace()
-        if split_idx is not None:
-            image_tokens = self.token_stack(image_tokens, split_idx)
-            image_tokens = rearrange(image_tokens, 'b f n c -> b (f n) c')
         # print(f"rank: {get_rank()}, inference, stacked_image_tokens: {image_tokens.shape}")
         attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
         

@@ -19,8 +19,8 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=5120
-MICRO_BATCH=320
+GLOBAL_BATCH=4104
+MICRO_BATCH=57
 train_iters=500000
 cur_data="`date +%m%d`"
 cur_time="`date +%H%M%S`"
@@ -45,7 +45,7 @@ cat <<EOT > $DS_CONFIG
 {
     "train_batch_size" : $GLOBAL_BATCH,
     "train_micro_batch_size_per_gpu": $MICRO_BATCH,
-    "gradient_accumulation_steps": 2,
+    "gradient_accumulation_steps": 9,
     "optimizer": {
         "type": "Adam",
         "params": {
@@ -92,7 +92,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --global-batch-size $GLOBAL_BATCH \
     --log-path $exp_name \
     --train-iters $train_iters \
-    --test-iters 100 \
+    --test-iters 0 \
     --test-interval 2500 \
     --save-interval 2500 \
     --seed 42 \
@@ -109,8 +109,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --fp16 $fp16 \
     --text_encoder $text_encoder \
     --batch_size $MICRO_BATCH \
-    --loader_bs 1 \
-    --eval-eps 5 \
+    --eval-eps 0 \
     --sub_data "language_table_sim" \
     --eval-timeout 100 \
     --alias $alias \

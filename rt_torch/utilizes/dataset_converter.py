@@ -38,7 +38,7 @@ from PIL import Image
 os.environ["CUDA_VISIBLE_DEVICES"] = ''
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--ds_name', default="", type=str)
+parser.add_argument('--ds_name', default="language_table_sim", type=str)
 
 dataset_paths = {
     'language_table': '/raid/robotics_data/language_table',
@@ -78,21 +78,10 @@ def main(dataset_name):
     ])
     text_encoder = UniversalSentenceEncoder(device="cpu")
     dataset_path = dataset_paths[dataset_name]
-    np_path = dataset_path + "_test"
+    np_path = dataset_path + "_npy"
     obs_path = np_path + "/observations"
     print("np_path: ", np_path)
     print("obs_path: ", obs_path)
-    # paths = {    
-    #     "action": [np_path + "/actions", []],
-    #     "is_terminal": [np_path + "/is_terminals", []],
-    #     "instruction": [obs_path + "/instructions", []],
-    #     "is_first": [np_path + "/is_firsts", []],
-    #     "is_last": [np_path + "/is_lasts", []],
-    #     "effector_target_translation": [obs_path + "/effector_target_translations", []],
-    #     "effector_translation": [obs_path + "/effector_translations", []],
-    #     "rgb": [obs_path + "/rgbs", []],
-    #     "reward": [np_path + "/rewards", []],
-    # }
     paths = {    
         "action": [np_path + "/actions", []],
         "instruction": [obs_path + "/instructions", []],
@@ -100,7 +89,7 @@ def main(dataset_name):
         "reward": [np_path + "/rewards", []],
         "inst_embed": [obs_path + "/inst_embedding_use", None],
     }
-    traj_len = [np_path + "/traj_len.npz", []]
+    traj_len = [np_path + "/traj_len.npy", []]
     for values in paths.values():
         os.makedirs(values[0], exist_ok=True)
     builder = tfds.builder_from_directory(dataset_path)
@@ -127,7 +116,7 @@ def main(dataset_name):
         ep_act_array = np.array(paths["action"][1])
         actions.append(ep_act_array)
         for value in paths.values():
-            np.savez_compressed(os.path.join(value[0], str(ep_idx) + '.npz'), value[1])
+            np.save(os.path.join(value[0], str(ep_idx) + '.npy'), value[1])
     np.savez_compressed(traj_len[0], np.array(traj_len[1]))
     quantileBinning(actions, np_path)
 
