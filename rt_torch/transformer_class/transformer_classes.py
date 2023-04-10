@@ -132,6 +132,7 @@ class TransformerBlocks(nn.Module):
             Rearrange('... (a b) -> ... a b', b=vocab_size),
         )
         self.return_last = return_last
+        self.act_idx = torch.arange(7, 48, 8, dtype=torch.long)
 
     def forward(self,
                 inputs: torch.Tensor,
@@ -149,11 +150,7 @@ class TransformerBlocks(nn.Module):
 
         for layer in self.layers:
             x = layer(x, attention_mask)
-        if self.return_last:
-            # import pdb; pdb.set_trace()
-            # print(f"x {x.shape}")
-            x = x[:, -1]  # b (t n) d
-            # print(f"x after {x.shape}")
+        x = x[:, self.act_idx]
         return self.output_tokens(x)
 
 

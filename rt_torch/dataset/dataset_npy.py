@@ -149,17 +149,21 @@ class language_table_dataset_npy(Dataset):
         rgb = torch.tensor(rgb)
         act = torch.tensor(act)
         inst = torch.tensor(inst)
+        act_mask = torch.ones(self.seq_len, 2)
         if step_idx < self.seq_len - 1:
-            rgb_seq = torch.cat([torch.zeros(self.seq_len - step_idx - 1, *rgb.shape[1:]), rgb[0:step_idx + 1]])
-            inst_seq = torch.cat([torch.zeros(self.seq_len - step_idx - 1, self.text_embed_dim), inst[0:step_idx + 1]])
+            rgb_seq = torch.cat([rgb[0:step_idx + 1], torch.zeros(self.seq_len - step_idx - 1, *rgb.shape[1:])])
+            inst_seq = torch.cat([inst[0:step_idx + 1], torch.zeros(self.seq_len - step_idx - 1, self.text_embed_dim)])
+            act = torch.cat([act[0:step_idx + 1], torch.zeros(self.seq_len - step_idx - 1, act.shape[1])])
+            act_mask[step_idx + 1:] = 0
             # padding_detail += f"length {self.seq_len - ep_start_idx}\n"
         else:
             # padding_detail += f"None\n"
             rgb_seq = rgb[step_idx - self.seq_len + 1:step_idx + 1]
             inst_seq = inst[step_idx - self.seq_len + 1:step_idx + 1]
-        act = act[step_idx]
+            act = act[step_idx - self.seq_len + 1:step_idx + 1]
+        # import pdb; pdb.set_trace()
         act = self.action_tokenizer.discretize(act)
-        return rgb_seq, inst_seq, act
+        return rgb_seq, inst_seq, act, act_mask
             
         
     def __getitem__(self, index):

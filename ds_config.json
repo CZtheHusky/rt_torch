@@ -1,6 +1,6 @@
 {
-    "train_batch_size" : 512,
-    "train_micro_batch_size_per_gpu": 64,
+    "train_batch_size" : 440,
+    "train_micro_batch_size_per_gpu": 55,
     "gradient_accumulation_steps": 1,
     "optimizer": {
         "type": "AdamW",
@@ -25,7 +25,7 @@
     "tensorboard": {
         "enabled": true,
         "job_name": "train",
-        "output_path": /home/cz/bs/rt_torch/history/0406-230134-use-1e-4-1-1-8-512-deepspeed-vanilla
+        "output_path": /home/cz/bs/rt_torch/history/0407-015537-use-1e-4-1-1-8-768-deepspeed-vanilla
     },
 
     "wall_clock_breakdown" : true,

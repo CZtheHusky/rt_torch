@@ -39,7 +39,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--device', default="cuda", type=str)
 parser.add_argument('--device_idx', default="0", type=str)
 parser.add_argument('--text_encoder', default="t5", type=str)
-parser.add_argument('--batch_size', default=180, type=int, help='batch size')
+parser.add_argument('--batch_size', default=16, type=int, help='batch size')
 parser.add_argument('--loader_shuffle', default=True, type=bool, help="")
 parser.add_argument('--quantile', default=True, type=bool, help="")
 parser.add_argument('--loader_worker', default=32, type=int, help='')
@@ -203,7 +203,7 @@ def main(args):
         gpus = tf.config.list_physical_devices('GPU')
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
-
+    # import pdb; pdb.set_trace()
     if args.model == "vanilla":
         model = RT1_transformer(
                 num_actions=num_actions,

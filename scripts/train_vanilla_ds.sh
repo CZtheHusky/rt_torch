@@ -19,8 +19,8 @@ BASE_PATH=.
 DS_CONFIG=ds_config.json
 
 
-GLOBAL_BATCH=512
-MICRO_BATCH=64
+GLOBAL_BATCH=440
+MICRO_BATCH=55
 
 train_iters=500000
 cur_data="`date +%m%d`"
@@ -31,7 +31,8 @@ lr_eff=1
 min_lr=1e-5
 heads=8
 depth=8
-model_dim=512
+model_dim=768
+key_dim=96
 model_type="vanilla"
 fp16="True"
 host="localhost:0,1,2,3,4,5,6,7"
@@ -55,7 +56,7 @@ cat <<EOT > $DS_CONFIG
     "optimizer": {
         "type": "AdamW",
         "params": {
-            "lr": 1e-4,
+            "lr": $lr,
             "betas": [0.9, 0.999],
             "eps": 1e-8,
             "weight_decay": 1e-4
@@ -68,7 +69,7 @@ cat <<EOT > $DS_CONFIG
     "scheduler": {
         "type": "CosineAnnealingLR",
         "params": {
-            "eta_min": 1e-5,
+            "eta_min": $min_lr,
             "T_max": $train_iters,
         }
     }
@@ -96,12 +97,13 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --log-path $exp_name \
     --train-iters $train_iters \
     --text_encoder $text_encoder \
-    --test-iters 1 \
+    --test-iters 100 \
     --test-interval 2500 \
     --save-interval 2500 \
     --seed 42 \
     --depth $depth \
     --model_dim $model_dim \
+    --key_dim $key_dim \
     --lr-decay-style "cosine" \
     --lr $lr \
     --lr_t $lr_t \
@@ -112,7 +114,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --adam-beta2 0.95 \
     --fp16 $fp16 \
     --batch_size $MICRO_BATCH \
-    --eval-eps 1 \
+    --eval-eps 5 \
     --eval-timeout 100 \
     --sub_data "language_table_sim" \
     --alias $alias \

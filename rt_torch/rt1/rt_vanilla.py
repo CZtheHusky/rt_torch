@@ -38,7 +38,7 @@ class RT1_transformer(nn.Module):
                                               num_tokens=learned_token_num,
                                               dropout_rate=token_learner_dropout,
                                               text_embedding_dim=self.text_embed_dim,
-                                              conditioning=False)
+                                              conditioning=True)
         self.num_learned_tokens = self.image_tokenizer._num_tokens
         self.image_embed_dim = self.image_tokenizer._embedding_output_dim
         self.transformer = TransformerBlocks(num_actions=num_actions, 
@@ -55,7 +55,7 @@ class RT1_transformer(nn.Module):
         self.return_last = return_last
         self.seq_len = seq_len
         self.memory_buffer = None
-        self.criterion = nn.CrossEntropyLoss(reduction="mean")
+        self.criterion = nn.CrossEntropyLoss(reduction="none")
 
 
     def forward(
@@ -65,58 +65,34 @@ class RT1_transformer(nn.Module):
         # bs sql c h w
         # bs sql d
         # bs d
-        frames, texts_embeddings, actions = data
+        frames, texts_embeddings, actions, act_mask = data
         batch_size = frames.shape[0]
-        # rgb_size, embedding_size, action_size, split_idx_size = frames.shape, texts_embeddings.shape, actions.shape, split_idx.shape
-        # print(f"rank: {get_rank()}, inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
-        # print(f"inference, rgb: {rgb_size}, embedding: {embedding_size}, action: {action_size}, split: {split_idx_size}")
         device = frames.device
-        # import pdb; pdb.set_trace()
-        # print(f"rank: {get_rank()}, inference, frames: {frames.shape}, texts_embeddings: {texts_embeddings.shape}")
         frames = rearrange(frames, 'b l c h w -> (b l) c h w')
         texts_embeddings = rearrange(texts_embeddings, 'b l d -> (b l) d')
         image_tokens = self.image_tokenizer(frames, texts_embeddings)
         image_tokens = rearrange(image_tokens, '(b l) n d -> b (l n) d', b=batch_size)
-        # print(f"rank: {get_rank()}, inference, image_tokens: {image_tokens.shape}")
-        # import pdb; pdb.set_trace()
-        # print(f"rank: {get_rank()}, inference, stacked_image_tokens: {image_tokens.shape}")
         attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
-        
-        # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
-        if not self.return_last:
-            logits = logits[:, -1]
-        logits = logits.permute(0, 2, 1)
-        # logits = logits.view(-1, logits.shape[-1])
-        # actions_discretes = self.action_tokenizer.discretize(actions)
-        # actions_discretes = actions_discretes.view(-1)
-        # print(f"rank: {get_rank()}, inference: logits: {logits.shape}, actions_discretes: {actions_discretes.shape}")
+        logits = logits.view(-1, logits.shape[-1])
+        actions = actions.flatten()
         loss = self.criterion(logits, actions)
-        # print(f"rank: {get_rank()}, inference: {float(loss.item())}")
-        # import pdb; pdb.set_trace()
+        act_mask = act_mask.flatten()
+        loss = loss * act_mask
+        loss = loss.sum() / act_mask.sum()
         return loss
 
     def inference(self, rgb, instruction, inst_buffer, device):
-        # print(f"rgb: {rgb.shape}")
-        # print(f"inst_buffer: {inst_buffer.shape}")
         texts_embeddings = self.text_tokenizer.embed_texts(instruction, device=device)
         texts_embeddings = texts_embeddings.to(inst_buffer.dtype)
-        # print(f"texts_embeddings: {texts_embeddings.shape}")
-        # print(f"inst_buffer {inst_buffer.device}, texts_embeddings {texts_embeddings.device}")
         all_embeddings = torch.cat([inst_buffer, texts_embeddings])
         image_tokens = self.image_tokenizer(rgb, all_embeddings)
-        # print(f"image_tokens before: {image_tokens.shape}")
         image_tokens = rearrange(image_tokens, 'f n c -> (f n) c')
         image_tokens = image_tokens.view(1, *image_tokens.shape)
-        # print(f"image_tokens after: {image_tokens.shape}")
         attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens), dtype=torch.bool, device=device).triu(1)
-        # print(f"attn_mask: {attn_mask.shape}")
         logits = self.transformer(image_tokens, attention_mask=attn_mask)
-        # print(f"logits: {logits.shape}")
-        # action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
-        # print(f"action last: {action.shape}")
+        logits = logits[:, -1]
         out = logits.detach().cpu().squeeze(0)
-        # print(f"action: {out}")
         return out, texts_embeddings
 
     def save_check_point(self, iteration, optimizer, save_path, logger, max_save_num, lr_scheduler=None):

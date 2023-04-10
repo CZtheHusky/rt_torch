@@ -29,14 +29,15 @@ def train_step(args, model, data_iterator):
 def get_batch(args, data_iterator):
     data = next(data_iterator)
     device = args.device
-    rgbs, instructions, actions = data
+    rgbs, instructions, actions, act_mask = data
     if args.fp16:
         rgbs = rgbs.to(dtype=torch.half)
         instructions = instructions.to(dtype=torch.half)
     rgbs = rgbs.to(device)
     actions = actions.to(device)
     instructions = instructions.to(device)
-    return [rgbs, instructions, actions]
+    act_mask = act_mask.to(device)
+    return [rgbs, instructions, actions, act_mask]
 
 
 def forward_and_backward_step(
