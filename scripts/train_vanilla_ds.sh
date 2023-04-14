@@ -95,6 +95,7 @@ deepspeed --include $host  --master_port $DS_PORT /home/cz/bs/rt_torch/train_ds.
     --micro-batch-size $MICRO_BATCH \
     --global-batch-size $GLOBAL_BATCH \
     --log-path $exp_name \
+    --load-dir /home/cz/bs/rt_torch/history/0407-015537-use-1e-4-1-1-8-768-deepspeed-vanilla \
     --train-iters $train_iters \
     --text_encoder $text_encoder \
     --test-iters 100 \

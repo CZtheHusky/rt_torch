@@ -91,12 +91,8 @@ def main(args):
             load_optimizer_states=True,
             load_lr_scheduler_states=True,
         )
+        print(client_state)
         args.iteration = client_state["iteration"]
-        print_with_rank(
-            "load at iter: {}, lr: {}".format(
-                client_state["iteration"], model_engine.client_lr_scheduler.get_lr()
-            )
-        )
     args.device = model_engine.device
     print(f" ============= device: {args.device} ==============")
     model_engine.text_tokenizer.text_model.model = model_engine.text_tokenizer.text_model.model.to(args.device)
