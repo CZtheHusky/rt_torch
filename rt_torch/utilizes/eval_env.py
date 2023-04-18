@@ -89,101 +89,95 @@ def eval_in_env(args, model, video_path, rank, iteration, text_embed_dim, action
         eval_eps = 0
         ep_reward = 0
         ep_steps = 0
-        if args is None:
-            rgb = transform(env_obs['rgb'])
-            rgb_video = []
-            rgb_video.append(env_obs['rgb'])
-            videos.append(env.render())
-            rgbs = deque([torch.zeros([300, 300, 3])] * 5, maxlen=args.seq_len)
-            inst_buffer = deque([torch.zeros(text_embed_dim)] * 5, maxlen=args.seq_len - 1)
-            while eval_eps < 10:
-                rgbs.append(rgb)
-                # import pdb; pdb.set_trace()
-                env_obs, reward, terminal, info = env.step(env.action_space.sample())
-                ep_steps += 1
-                instruction = nlp_inst_decoder(env_obs['instruction'])
-                rgb_video.append(env_obs['rgb'])
-                rgb = transform(env_obs['rgb'])
-                ep_reward += reward
-                videos.append(env.render())
-                if terminal or ep_steps >= 100:
-                    rewards.append(ep_reward)
-                    ep_length.append(ep_steps)
-                    save_video(videos, video_path, rank, ep_reward, eval_eps)
-                    save_video(rgb_video, video_path, rank, ep_reward, eval_eps + 10)
-                    ep_reward = 0
-                    rgbs = deque([torch.ones(300, 300, 3)] * 5, maxlen=args.seq_len)
-                    inst_buffer = deque([""] * 5, maxlen=args.seq_len - 1)
-                    env_obs = env.reset()
-                    instruction = nlp_inst_decoder(env_obs['instruction'])
-                    rgb = transform(env_obs['rgb'])
-                    videos = []
-                    # if ep_steps == 100:
-                    #     print(f"ep {eval_eps} timeout")
-                    # else:
-                    #     print(f"ep {eval_eps} done")
-                    ep_steps = 0
-                    eval_eps += 1
+        fp16 = args.fp16
+        device = args.device
+        # import pdb; pdb.set_trace()
+        rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
+        videos.append(env.render()[:,:,::-1])
+        model.eval()
+        if args.fp16:
+            rgbs_tmp = [torch.zeros(rgb.shape, dtype=torch.half, device=device)] * 5
+            inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.half, device=device)] * 5
         else:
-            fp16 = args.fp16
-            device = args.device
+            rgbs_tmp = [torch.zeros(rgb.shape, dtype=torch.float, device=device)] * 5
+            inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.float, device=device)] * 5
+        rgbs = deque(rgbs_tmp, maxlen=args.seq_len)
+        inst_buffer = deque(inst_tmp, maxlen=args.seq_len - 1)
+        while eval_eps < args.eval_eps:
+            # print('env step')
+            rgbs.append(rgb)
+            out, texts_embeddings = model.inference(torch.stack(list(rgbs)), [instruction], torch.stack(list(inst_buffer)), device)
             # import pdb; pdb.set_trace()
+            action = action_tokenizer.discrete2Scalar(out)
+            inst_buffer.append(texts_embeddings.squeeze(0))
+            env_obs, reward, terminal, info = env.step(action)
+            ep_steps += 1
+            instruction = nlp_inst_decoder(env_obs['instruction'])
             rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
+            ep_reward += reward
             videos.append(env.render()[:,:,::-1])
-            model.eval()
-            if args.fp16:
-                rgbs_tmp = [torch.zeros(rgb.shape, dtype=torch.half, device=device)] * 5
-                inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.half, device=device)] * 5
-            else:
-                rgbs_tmp = [torch.zeros(rgb.shape, dtype=torch.float, device=device)] * 5
-                inst_tmp = [torch.zeros(text_embed_dim, dtype=torch.float, device=device)] * 5
-            rgbs = deque(rgbs_tmp, maxlen=args.seq_len)
-            inst_buffer = deque(inst_tmp, maxlen=args.seq_len - 1)
-            while eval_eps < args.eval_eps:
-                # print('env step')
-                rgbs.append(rgb)
-                out, texts_embeddings = model.inference(torch.stack(list(rgbs)), [instruction], torch.stack(list(inst_buffer)), device)
-                # import pdb; pdb.set_trace()
-                action = action_tokenizer.discrete2Scalar(out)
-                inst_buffer.append(texts_embeddings.squeeze(0))
-                env_obs, reward, terminal, info = env.step(action)
-                ep_steps += 1
+            if terminal or ep_steps >= args.eval_timeout:
+                # if ep_steps >= args.eval_timeout:
+                #     rewards.append(0)
+                # else:
+                # print(f"==========rank {rank} episode done==========")
+                ep_length.append(ep_steps)
+                rewards.append(ep_reward)
+                save_video(videos, video_path, rank, ep_reward, eval_eps)
+                ep_steps = 0
+                ep_reward = 0
+                rgbs = deque(rgbs_tmp, maxlen=args.seq_len)
+                inst_buffer = deque(inst_tmp, maxlen=args.seq_len - 1)
+                env_obs = env.reset()
                 instruction = nlp_inst_decoder(env_obs['instruction'])
                 rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
-                ep_reward += reward
+                videos = []
                 videos.append(env.render()[:,:,::-1])
-                if terminal or ep_steps >= args.eval_timeout:
-                    # if ep_steps >= args.eval_timeout:
-                    #     rewards.append(0)
-                    # else:
-                    # print(f"==========rank {rank} episode done==========")
-                    ep_length.append(ep_steps)
-                    rewards.append(ep_reward)
-                    save_video(videos, video_path, rank, ep_reward, eval_eps)
-                    ep_steps = 0
-                    ep_reward = 0
-                    rgbs = deque(rgbs_tmp, maxlen=args.seq_len)
-                    inst_buffer = deque(inst_tmp, maxlen=args.seq_len - 1)
-                    env_obs = env.reset()
-                    instruction = nlp_inst_decoder(env_obs['instruction'])
-                    rgb = frame_preprocess(transform, env_obs['rgb'], fp16, device)
-                    videos = []
-                    videos.append(env.render()[:,:,::-1])
-                    eval_eps += 1
-        if rank == 0:
-            video_dirs = os.listdir(root_path)
-            if len(video_dirs) > 10:
-                video_dirs = sorted(video_dirs)
-                num = len(video_dirs) - 10
-                for i in range(num):
-                    shutil.rmtree(os.path.join(root_path, video_dirs[i]))
-        if args.eval_eps != 0 :
-            return np.array([np.array(rewards).mean(), np.array(ep_length).mean()])
-        else:
-            return np.array([0., 0.])
+                eval_eps += 1
+    if rank == 0:
+        video_dirs = os.listdir(root_path)
+        if len(video_dirs) > 10:
+            video_dirs = sorted(video_dirs)
+            num = len(video_dirs) - 10
+            for i in range(num):
+                shutil.rmtree(os.path.join(root_path, video_dirs[i]))
+    if args.eval_eps != 0 :
+        return np.array([np.array(rewards).mean(), np.array(ep_length).mean()])
+    else:
+        return np.array([0., 0.])
 
 
+
+def local_test(eps=1000):
+    env = language_table.LanguageTable(
+        block_mode=blocks.LanguageTableBlockVariants.BLOCK_8,
+        reward_factory=block2block.BlockToBlockReward,
+        control_frequency=5,
+        # seed=0,
+    )
+    ep_reward = 0
+    rewards = []
+    ep_steps = []
+    ep_step = 0
+    env.reset()
+    eval_eps = 0
+    while eval_eps < eps:
+        # import pdb; pdb.set_trace()
+        env_obs, reward, terminal, info = env.step(env.action_space.sample())
+        ep_step += 1
+        instruction = nlp_inst_decoder(env_obs['instruction'])
+        ep_reward += reward
+        if terminal or ep_step >= 100:
+            ep_reward = 0
+            env_obs = env.reset()
+            instruction = nlp_inst_decoder(env_obs['instruction'])
+            print(f"Ep done, ep steps: {ep_step}, ep reward: {ep_reward}")
+            ep_step = 0
+            eval_eps += 1
+            rewards.append(ep_reward)
+            ep_steps.append(ep_step)
+    print(f"Average Random Ep Steps: {np.mean(ep_steps)}\nAverage Random Ep Rewards: {np.mean(rewards)}")
 
 if __name__ == "__main__":
-    eval_in_env(None, None, video_path="/home/cz/bs/rt_torch", rank=0, iteration=0)
+    local_test()
 
