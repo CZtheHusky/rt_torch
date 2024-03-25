@@ -16,8 +16,14 @@ from rt_torch.utilizes.train_configs import *
 from rt_torch.utilizes.training_functions import *
 from rt_torch.utilizes.loggings import log_init
 import json
+import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import torch.nn as nn
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
 
-def main(args):
+def main(rank, args, world_size):
     batch_size = args.batch_size
     text_encoder = args.text_encoder
     depth = args.depth
@@ -30,13 +36,9 @@ def main(args):
     token_learner_num = args.token_learner_num
     args.loader_shuffle = True if args.loader_shuffle else False
     loader_bs = args.loader_bs
-    if args.text_encoder == "use_tf":
-        import tensorflow as tf
-        gpus = tf.config.list_physical_devices('GPU')
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
+    dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
     if args.model == "vanilla":
-        model = RT1_transformer(
+        model_engine = RT1_transformer(
                 num_actions=num_actions,
                 vocab_size=vocab_size,
                 num_layers=depth,
@@ -53,7 +55,7 @@ def main(args):
                 return_last=True,
         )
     elif args.model == "fusion":
-        model = RT1_fusion(
+        model_engine = RT1_fusion(
             num_actions=num_actions,
             vocab_size=vocab_size,
             fusion_layers=4,
@@ -69,37 +71,12 @@ def main(args):
             return_last=True,
             d_model=model_dim,
         )
-    optimizer = get_optimizer(args, model)
+    optimizer = get_optimizer(args, model_engine)
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     log_path = args.log_path
     os.makedirs(log_path, exist_ok=True)
     with open(os.path.join(log_path, 'args.json'), 'w') as f:
         json.dump(args.__dict__, f)
-    deepspeed.init_distributed(distributed_port=args.deepspeed_port)
-    # mpu.initialize_model_parallel()
-    # if mpu.get_data_parallel_rank() == 0:
-    #     print(
-    #         " > number of parameters on (tensor, pipeline) "
-    #         "model parallel rank ({}, {}): {}".format(
-    #             mpu.get_tensor_model_parallel_rank(),
-    #             mpu.get_pipeline_model_parallel_rank(),
-    #             sum([p.nelement() for p in model.parameters()]),
-    #         ),
-    #         flush=True,
-    #     )
-    # print_rank_0(" ============= MPU_INIT ==============")
-    model_engine, _, _, _ = deepspeed.initialize(
-        args,
-        model,
-        model_parameters=model.parameters(),
-        # mpu=mpu,
-        optimizer=optimizer,
-        lr_scheduler=opt_param_scheduler,
-    )
-    print_rank_0(" ============= DS_INIT ==============")
-    if args.fp16:
-        print(args.fp16)
-        print(model_engine.fp16_enabled())
     if args.load_dir:
         load_dir, client_state = model_engine.load_checkpoint(
             args.load_dir,
@@ -114,8 +91,6 @@ def main(args):
         )
     args.device = model_engine.device
     model_engine.text_tokenizer.text_model.model = model_engine.text_tokenizer.text_model.model.to(args.device)
-    world_size = dist.get_world_size()
-    rank = model_engine.global_rank
     # logger, handler = log_init(args, rank)
     # print_with_rank(f"building dataset with seed: {rank}")
     train_set, test_set = build_language_table_ds(split=0.9, batch_size=batch_size // loader_bs, seq_len=seq_len, seed=args.seed, dumb=False, sub_data="language_table_sim")
@@ -220,7 +195,8 @@ def main(args):
             pbar.update(1)
         if args.save_interval and iteration % args.save_interval == 0 or iteration == args.train_iters:
             # print_with_rank(f"saving ckpt: {log_path}, iteration: {iteration}")
-            save_checkpoint(args, log_path, iteration, model_engine)
+            if rank == 0:
+                model_engine.save_check_point(args, log_path, iteration, model_engine)
             # print_with_rank(f"saving ckpt done, path: {log_path}, iteration: {iteration}")
     # if rank == 0:
         # writer.close()
@@ -228,6 +204,16 @@ def main(args):
         # logging.shutdown()
 
 
+def ddp_start(arg):
+    world_size = 3
+    mp.spawn(main,
+        args=(arg, world_size,),
+        nprocs=world_size,
+        join=True)
+
 if __name__ == "__main__":
     args = parse_args()
-    main(args)
+    os.environ['CUDA_VISIBLE_DEVICES'] = "0,1,2"
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "29500"
+    ddp_start(args)

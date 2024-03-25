@@ -1,13 +1,14 @@
 import os
 
 import torch
-from einops import rearrange
+from einops import rearrange, repeat
 from torch import nn
-
+from einops.layers.torch import Rearrange
 from rt_torch.tokenizers.action_tokenizer import ActionTokenizer
 from rt_torch.tokenizers.image_tokenizer import ImageTokenizer
 from rt_torch.tokenizers.text_tokenizer import TextTokenizer
-from rt_torch.transformer_class.transformer_classes import LanguageVisionFusion, positional_encoding, positional_encoding_2d
+from rt_torch.transformer_class.transformer_classes import LanguageVisionFusion, positionalencoding1d, positionalencoding2d, FFNResidual, FusionActionDecoder
+import math
 
 
 # Robotic Transformer
@@ -24,47 +25,61 @@ class RT1_fusion(nn.Module):
             key_dim=4096,
             feed_forward_size=512,
             text_encoder='t5',
-            seq_len=6,
+            seq_len=4,
             text_model_device='cpu',
             token_learner=False,
             learned_token_num=8,
-            token_learner_dropout=0.1,
-            transformer_dropout=0.1,
-            feature_dropout=0.1,
+            dropout=0.1,
+            ffn_res_dim=1024,
+            ffn_res_blocks=2,
             return_last=True,
             d_model=512,
     ):
         super().__init__()
         self.action_tokenizer = ActionTokenizer()
-        self.image_tokenizer = ImageTokenizer(use_token_leraner=token_learner,
-                                              num_tokens=learned_token_num,
-                                              dropout_rate=token_learner_dropout)
-        self.image_embed_dim = self.image_tokenizer._embedding_output_dim
         self.text_tokenizer = TextTokenizer(name=text_encoder,
                                             device=text_model_device)
-        self.num_learned_tokens = self.image_tokenizer._num_tokens
+        self.text_embed_dim = self.text_tokenizer.text_embed_dim
+        self.image_tokenizer = ImageTokenizer(use_token_leraner=token_learner,
+                                              num_tokens=learned_token_num,
+                                              dropout_rate=dropout,
+                                              text_embedding_dim=self.text_embed_dim,
+                                              conditioning=False)
+        self.image_embed_dim = self.image_tokenizer._embedding_output_dim
+        # self.num_learned_tokens = self.image_tokenizer._num_tokens
         self.d_model = d_model
-        self.image_dropout = nn.Dropout(p=feature_dropout)
-        self.lang_dropout = nn.Dropout(p=feature_dropout)
+
         self.fusion = LanguageVisionFusion(
-            nheads=fusion_nhead,
-            dropout=transformer_dropout,
+            nhead=fusion_nhead,
+            dropout=dropout,
             d_model=d_model,
             n_layer=fusion_layers,
-            dim_feedforward=d_model
+            dim_feedforward=d_model,
+            image_embed_dim=self.image_embed_dim,
+            text_embed_dim=self.text_embed_dim,
         )
-        self.transformer = LanguageVisionFusion(
-            nheads=transformer_nhead,
-            dropout=transformer_dropout,
+        self.transformer = FusionActionDecoder(
+            token_dim=d_model,
+            nhead=transformer_nhead,
+            dropout=dropout,
             d_model=d_model,
             n_layer=transformer_layers,
             dim_feedforward=d_model
         )
-        self.image_token_embedding = nn.Linear(self.image_embed_dim, d_model)
-        self.text_token_embedding = nn.Linear(self.text_tokenizer.text_embed_dim, d_model)
-        self.position_embedding = nn.Embedding(seq_len, feed_forward_size)
+        self.ffn_residual = FFNResidual(
+            input_dim=self.d_model,
+            dim=ffn_res_dim,
+            num_blocks=ffn_res_blocks,
+        )
+        self.action_proj = nn.Sequential(
+            nn.Linear(ffn_res_dim, num_actions * vocab_size),
+            Rearrange('... (a b) -> ... a b', b=vocab_size),
+            )
+
+        # self.position_embedding = nn.Embedding(seq_len, feed_forward_size)
         self.seq_len = seq_len
         self.memory_buffer = None
+        
         self.action_tokenizer = ActionTokenizer(num_action_bin=vocab_size, action_max=0.1, action_min=-0.1)
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
@@ -105,36 +120,20 @@ class RT1_fusion(nn.Module):
         else:
             texts_embeddings.extend([""] * self.seq_len - 1)
             texts_embeddings = self.text_tokenizer(texts_embeddings)
-        # import pdb; pdb.set_trace()
         # print(f"rank: {get_rank()}, inference, frames: {frames.shape}, texts_embeddings: {texts_embeddings.shape}")
-        texts_embeddings = self.text_token_embedding(texts_embeddings)
-        texts_embeddings = self.lang_dropout(texts_embeddings)
-        image_tokens = self.image_tokenizer(frames, texts_embeddings)
-
-        height, width = image_tokens.shape[2], image_tokens.shape[3]
-        image_tokens = rearrange(image_tokens, 'b c h w -> b (h w) c')
-        vision_embed = self.image_token_embedding(image_tokens)
-        vision_embed *= torch.sqrt(self.d_model)
-        vision_embed = rearrange(vision_embed, 'b (h w) c -> b h w c', h=height, w=width)
-        vision_embed = positional_encoding_2d(vision_embed, self.d_model)
-        vision_embed = rearrange(vision_embed, 'b h w c -> b (h w) c')
-        vision_embed = self.image_dropout(vision_embed)
-        fused_embed = self.fusion(texts_embeddings, vision_embed)
+        image_tokens = self.image_tokenizer(frames)
+        fused_embed = self.fusion(image_tokens, texts_embeddings)
         if split_idx is not None:
             fused_embed = self.token_stack(fused_embed, split_idx)
-            fused_embed = rearrange(image_tokens, 'b f n c -> b (f n) c')
+            # fused_embed = rearrange(image_tokens, 'b f n c -> b (f n) c')
 
         # print(f"rank: {get_rank()}, inference, image_tokens: {image_tokens.shape}")
         # import pdb; pdb.set_trace()
 
         # print(f"rank: {get_rank()}, inference, stacked_image_tokens: {image_tokens.shape}")
-        attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens),
-                               dtype=torch.bool, device=device).triu(1)
-
-        # attn_mask = repeat(attn_mask, 'i j -> (i r1) (j r2)', r1=self.num_learned_tokens, r2=self.num_learned_tokens)
-        logits = self.transformer(image_tokens, attention_mask=attn_mask)
-        if not self.return_last:
-            logits = logits[:, -1]
+        fused_embed = self.transformer(fused_embed)
+        fused_embed = self.ffn_residual(fused_embed)
+        logits = self.action_proj(fused_embed)
         # logits = logits.permute(0, 2, 1)
         logits = logits.view(-1, logits.shape[-1])
         actions_discretes = self.action_tokenizer.discretize(actions)
@@ -153,15 +152,11 @@ class RT1_fusion(nn.Module):
         # print(f"texts_embeddings: {texts_embeddings.shape}")
         # print(f"inst_buffer {inst_buffer.device}, texts_embeddings {texts_embeddings.device}")
         all_embeddings = torch.cat([inst_buffer, texts_embeddings])
-        image_tokens = self.image_tokenizer(rgb, all_embeddings)
-        # print(f"image_tokens before: {image_tokens.shape}")
-        image_tokens = rearrange(image_tokens, 'f n c -> (f n) c')
-        image_tokens = image_tokens.view(1, *image_tokens.shape)
-        # print(f"image_tokens after: {image_tokens.shape}")
-        attn_mask = torch.ones((self.seq_len * self.num_learned_tokens, self.seq_len * self.num_learned_tokens),
-                               dtype=torch.bool, device=device).triu(1)
-        # print(f"attn_mask: {attn_mask.shape}")
-        logits = self.transformer(image_tokens, attention_mask=attn_mask)
+        image_tokens = self.image_tokenizer(rgb)
+        fused_embed = self.fusion(image_tokens, all_embeddings)
+        fused_embed = self.transformer(fused_embed)
+        fused_embed = self.ffn_residual(fused_embed)
+        logits = self.action_proj(fused_embed)
         # print(f"logits: {logits.shape}")
         action = self.action_tokenizer.discrete2Scalar(logits.squeeze(0))
         # print(f"action last: {action.shape}")

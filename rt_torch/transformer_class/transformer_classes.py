@@ -3,7 +3,7 @@ from einops.layers.torch import Rearrange
 from torch import nn
 
 from rt_torch.utilizes.utilize import *
-
+import math
 
 class ConditionalAttention(nn.Module):
     def __init__(
@@ -180,9 +180,11 @@ class FusionTransformerBlocks(nn.Module):
             nn.Linear(dim_feedforward, d_model),
         )
 
-    def forward(self, query, key, attn_mask=None):
+    def forward(self, query, key=None, attn_mask=None):
+        if key is None:
+            key = query
         residual_query = query
-        query = self.qeury_norm(query)
+        query = self.query_norm(query)
         key = self.key_norm(key)
         x, _ = self.attention(query, key, key, attn_mask=attn_mask)
         x = x + residual_query
@@ -192,7 +194,7 @@ class FusionTransformerBlocks(nn.Module):
 
 
 
-class LanguageVisionFusion(nn.Module):
+class FusionTransformer(nn.Module):
     def __init__(
             self,
             nhead=8,
@@ -212,58 +214,179 @@ class LanguageVisionFusion(nn.Module):
              for _ in range(n_layer)]
         )
 
-    def forward(self, lan_emb, vis_emb, attn_mask=None):
-        for layer in self.transformer_blocks:
-            lan_emb = layer(lan_emb, vis_emb, attn_mask=attn_mask)
+    def forward(self, lan_emb, vis_emb=None, attn_mask=None):
+        if vis_emb is None:
+            for layer in self.transformer_blocks:
+                lan_emb = layer(lan_emb, lan_emb, attn_mask=attn_mask)
+        else:
+            for layer in self.transformer_blocks:
+                lan_emb = layer(lan_emb, vis_emb, attn_mask=attn_mask)
         return lan_emb
+    
+class LanguageVisionFusion(nn.Module):
+    def __init__(
+            self,
+            nhead=8,
+            dropout=0.1,
+            d_model=512,
+            n_layer=2,
+            dim_feedforward=2048,
+            image_embed_dim=512,
+            text_embed_dim=768,
+    ) -> None:
+        super().__init__()
+        self.transformer = FusionTransformer(
+            nhead=nhead,
+            dropout=dropout,
+            d_model=d_model,
+            n_layer=n_layer,
+            dim_feedforward=dim_feedforward
+        )
+        self.scale = d_model ** 0.5
+        self.image_token_embedding = nn.Linear(image_embed_dim, d_model)
+        self.text_token_embedding = nn.Linear(text_embed_dim, d_model)
+        self.image_dropout = nn.Dropout(p=dropout)
+        self.lang_dropout = nn.Dropout(p=dropout)
+        self.fused_norm = nn.LayerNorm(d_model)
+    
+    def forward(self, image_tokens, texts_embeddings):
+        texts_embeddings = self.text_token_embedding(texts_embeddings)
+        texts_embeddings = self.lang_dropout(texts_embeddings)
+        height, width = image_tokens.shape[2], image_tokens.shape[3]
+        image_tokens = rearrange(image_tokens, 'b c h w -> b (h w) c')
+        vision_embed = self.image_token_embedding(image_tokens)
+        vision_embed *= self.scale
+        vision_embed = rearrange(vision_embed, 'b (h w) c -> b h w c', h=height, w=width)
+        
+        pe = positionalencoding2d(vision_embed.shape[-1], height=vision_embed.shape[1], width=vision_embed.shape[2]).to(vision_embed.device)
+        vision_embed += pe.permute(1, 2, 0)
+        vision_embed = rearrange(vision_embed, 'b h w c -> b (h w) c')
+        vision_embed = self.image_dropout(vision_embed)
+        # import pdb; pdb.set_trace()
+
+        texts_embeddings = texts_embeddings.unsqueeze(1)
+        fused_embed = self.transformer(texts_embeddings, vision_embed)
+        fused_embed = fused_embed.squeeze(1)
+        return self.fused_norm(fused_embed)
 
 
+class FusionActionDecoder(nn.Module):
+    def __init__(            
+            self,
+            token_dim,
+            nhead=8,
+            dropout=0.1,
+            d_model=512,
+            n_layer=2,
+            dim_feedforward=2048,) -> None:
+        super().__init__()
+        self.transformer = FusionTransformer(
+            nhead=nhead,
+            dropout=dropout,
+            d_model=d_model,
+            n_layer=n_layer,
+            dim_feedforward=dim_feedforward,
+        )
+        self.ffn = nn.Linear(token_dim, d_model)
+        self.scale = d_model ** 0.5
+        self.post_norm = nn.LayerNorm(d_model)
+        self.dp = nn.Dropout(dropout)
 
-def positional_encoding(x, d_model):
-    """Adds positional encoding to a tensor.
+    def forward(self, tokens, attn_mask=None):
+        tokens = self.ffn(tokens)
+        tokens *= self.scale
+        # import pdb; pdb.set_trace()
+        if len(tokens.shape) == 2:
+            pe1 = positionalencoding1d(tokens.shape[-1], tokens.shape[0])
+        elif len(tokens.shape) == 3:
+            pe1 = positionalencoding1d(tokens.shape[-1], tokens.shape[1])
+        else:
+            import pdb; pdb.set_trace()
+        tokens += pe1.to(tokens.device)
+        tokens = self.dp(tokens)
+        logits = self.transformer(tokens, attn_mask=attn_mask)
+        # import pdb; pdb.set_trace()
+        if len(logits.shape) == 2:
+            logits = logits.mean(0)
+            logits = self.post_norm(logits.unsqueeze(0))
+        else:
+            logits = logits.mean(1)
+            logits = self.post_norm(logits)
+        
+        return logits
+    
 
-    Args:
-      x: Tensor with shape [batch_size, seq_length, d_model]
-      d_model: Model dimensionality.
+class FFNResidualBlock(nn.Module):
+    def __init__(self, dim=1024) -> None:
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(dim, dim // 4),
+            nn.ReLU(),
+            nn.Linear(dim // 4, dim // 4),
+            nn.ReLU(),
+            nn.Linear(dim // 4, dim),
+        )
 
-    Returns:
-      Tensor with the same shape as x.
+    def forward(self, x):
+        return x + self.layers(x)
+
+class FFNResidual(nn.Module):
+    def __init__(self, input_dim=512, dim=1024, num_blocks=2) -> None:
+        super().__init__()
+        self.blocks = nn.ModuleList([
+            FFNResidualBlock(dim) for i in range(num_blocks)
+        ])
+        self.ffn = nn.Linear(input_dim, dim)
+    
+    def forward(self, x):
+        x = self.ffn(x)
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+
+def positionalencoding1d(d_model, length):
     """
-    batch_size, seq_length = x.size(0), x.size(1)
-    pos = torch.arange(seq_length, dtype=torch.float32).unsqueeze(1)
-    div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-torch.log(10000.0) / d_model))
-    pos_embedding = torch.zeros((seq_length, d_model))
-    pos_embedding[:, 0::2] = torch.sin(pos * div_term)
-    pos_embedding[:, 1::2] = torch.cos(pos * div_term)
-    pos_embedding = pos_embedding.unsqueeze(0).repeat(batch_size, 1, 1)
-    x = x + pos_embedding.to(x.device)
-    return x
-
-def positional_encoding_2d(x, d_model):
-    """Adds positional encoding to a 2D tensor.
-
-    Args:
-      x: Tensor with shape [batch_size, height, width, d_model]
-      d_model: Model dimensionality.
-
-    Returns:
-      Tensor with the same shape as x.
+    :param d_model: dimension of the model
+    :param length: length of positions
+    :return: length*d_model position matrix
     """
-    batch_size, height, width = x.size(0), x.size(1), x.size(2)
-    pos_x = torch.arange(height, dtype=torch.float32).unsqueeze(1).repeat(1, width)
-    pos_y = torch.arange(width, dtype=torch.float32).unsqueeze(0).repeat(height, 1)
-    div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-torch.log(10000.0) / d_model))
-    pos_x_embedding = torch.zeros((height, d_model))
-    pos_x_embedding[:, 0::2] = torch.sin(pos_x * div_term)
-    pos_x_embedding[:, 1::2] = torch.cos(pos_x * div_term)
-    pos_y_embedding = torch.zeros((width, d_model))
-    pos_y_embedding[:, 0::2] = torch.sin(pos_y * div_term)
-    pos_y_embedding[:, 1::2] = torch.cos(pos_y * div_term)
-    pos_x_embedding = pos_x_embedding.unsqueeze(1).repeat(1, width, 1)
-    pos_y_embedding = pos_y_embedding.unsqueeze(0).repeat(height, 1, 1)
-    pos_embedding = torch.cat([pos_x_embedding, pos_y_embedding], dim=2).unsqueeze(0).repeat(batch_size, 1, 1, 1)
-    x = x + pos_embedding.to(x.device)
-    return x
+    if d_model % 2 != 0:
+        raise ValueError("Cannot use sin/cos positional encoding with "
+                         "odd dim (got dim={:d})".format(d_model))
+    pe = torch.zeros(length, d_model)
+    position = torch.arange(0, length).unsqueeze(1)
+    div_term = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) *
+                         -(math.log(10000.0) / d_model)))
+    pe[:, 0::2] = torch.sin(position.float() * div_term)
+    pe[:, 1::2] = torch.cos(position.float() * div_term)
+    return pe
+
+
+def positionalencoding2d(d_model, height, width):
+    """
+    :param d_model: dimension of the model
+    :param height: height of the positions
+    :param width: width of the positions
+    :return: d_model*height*width position matrix
+    """
+    if d_model % 4 != 0:
+        raise ValueError("Cannot use sin/cos positional encoding with "
+                         "odd dimension (got dim={:d})".format(d_model))
+    pe = torch.zeros(d_model, height, width)
+    # Each dimension use half of d_model
+    d_model = int(d_model / 2)
+    div_term = torch.exp(torch.arange(0., d_model, 2) *
+                         -(math.log(10000.0) / d_model))
+    pos_w = torch.arange(0., width).unsqueeze(1)
+    pos_h = torch.arange(0., height).unsqueeze(1)
+    pe[0:d_model:2, :, :] = torch.sin(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
+    pe[1:d_model:2, :, :] = torch.cos(pos_w * div_term).transpose(0, 1).unsqueeze(1).repeat(1, height, 1)
+    pe[d_model::2, :, :] = torch.sin(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
+    pe[d_model + 1::2, :, :] = torch.cos(pos_h * div_term).transpose(0, 1).unsqueeze(2).repeat(1, 1, width)
+
+    return pe
 
 
 if __name__ == "__main__":
